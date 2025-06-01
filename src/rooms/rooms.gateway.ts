@@ -29,8 +29,8 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly roomsService: RoomsService,
     private readonly jwtService: JwtService,
     private readonly canvasStorage: CanvasStorageService,
-    private readonly canvasSync: CanvasSyncHelper
-  ) { }
+    private readonly canvasSync: CanvasSyncHelper,
+  ) {}
 
   // Verificar conexión de un cliente
   async handleConnection(client: Socket) {
@@ -85,14 +85,14 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('roomCreated', room);
       client.emit('pageAdded', defaultPage);
 
-      console.log(`🛠️ Sala creada: ${room.name}, con Página 1, código: ${room.code}`);
+      console.log(
+        `🛠️ Sala creada: ${room.name}, con Página 1, código: ${room.code}`,
+      );
     } catch (error) {
       client.emit('error', { message: error.message });
     }
   }
-  F
-
-
+  F;
 
   // Unirse a una sala existente
   @SubscribeMessage('joinRoom')
@@ -118,7 +118,6 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.join(roomCode);
       // ✅ Enviar objetos existentes al nuevo usuario
 
-
       this.server.to(roomCode).emit('newUserJoined', { email: user.email });
       // Enviar el diagrama almacenado al cliente
       // Cargar el canvas existente y enviarlo al nuevo usuario
@@ -133,7 +132,6 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(roomCode).emit('updateUsersList', usersInRoom);
 
       client.emit('joinedRoom', room);
-
 
       console.log(`Usuario ${user.email} se unió a la sala: ${roomCode}`);
     } catch (error) {
@@ -191,26 +189,38 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       console.error(`Error guardando canvas para ${roomCode}:`, error);
     }
   }
-  private findComponentInArray(components: any[], componentId: string): any | null {
+  private findComponentInArray(
+    components: any[],
+    componentId: string,
+  ): any | null {
     for (const component of components) {
       if (component.id === componentId) return component;
       if (component.children) {
-        const found = this.findComponentInArray(component.children, componentId);
+        const found = this.findComponentInArray(
+          component.children,
+          componentId,
+        );
         if (found) return found;
       }
     }
     return null;
   }
 
-  private removeComponentFromArray(components: any[], componentId: string): boolean {
-    const index = components.findIndex(c => c.id === componentId);
+  private removeComponentFromArray(
+    components: any[],
+    componentId: string,
+  ): boolean {
+    const index = components.findIndex((c) => c.id === componentId);
     if (index !== -1) {
       components.splice(index, 1);
       return true;
     }
 
     for (const component of components) {
-      if (component.children && this.removeComponentFromArray(component.children, componentId)) {
+      if (
+        component.children &&
+        this.removeComponentFromArray(component.children, componentId)
+      ) {
         return true;
       }
     }
@@ -218,7 +228,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private findPageById(pages: any[], pageId: string) {
-    return pages.find(p => p.id === pageId);
+    return pages.find((p) => p.id === pageId);
   }
 
   private findComponentInPage(page: any, componentId: string): any | null {
@@ -237,7 +247,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private removeComponentFromPage(page: any, componentId: string): boolean {
     const remove = (components: any[]): boolean => {
-      const index = components.findIndex(c => c.id === componentId);
+      const index = components.findIndex((c) => c.id === componentId);
       if (index !== -1) {
         components.splice(index, 1);
         return true;
@@ -256,71 +266,74 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('addComponent')
   async handleAddComponent(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string, pageId: string, component: any }
+    @MessageBody() data: { roomCode: string; pageId: string; component: any },
   ) {
     try {
       const { roomCode, pageId, component } = data;
       const user = client.data.user;
 
       await this.canvasSync.updateRoomState(roomCode, (pages) => {
-        const page = pages.find(p => p.id === pageId);
+        const page = pages.find((p) => p.id === pageId);
         if (page) {
           page.components.push(component);
         }
       });
 
       this.server.to(roomCode).emit('componentAdded', { pageId, component });
-      console.log(`🆕 Componente agregado por ${user.email} en página ${pageId}`);
+      console.log(
+        `🆕 Componente agregado por ${user.email} en página ${pageId}`,
+      );
     } catch (error) {
       client.emit('error', { message: error.message });
     }
   }
 
-
   //agrega hijo
   @SubscribeMessage('addChildComponent')
-async handleAddChildComponent(
-  @ConnectedSocket() client: Socket,
-  @MessageBody()
-  data: {
-    roomCode: string;
-    pageId: string;
-    parentId: string;
-    childComponent: any;
+  async handleAddChildComponent(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomCode: string;
+      pageId: string;
+      parentId: string;
+      childComponent: any;
+    },
+  ) {
+    try {
+      const { roomCode, pageId, parentId, childComponent } = data;
+      const user = client.data.user;
+
+      await this.canvasSync.updateRoomState(roomCode, (pages) => {
+        const page = pages.find((p) => p.id === pageId);
+        if (!page) return;
+
+        const parent = this.findComponentInPage(page, parentId);
+        if (parent) {
+          if (!parent.children) parent.children = [];
+          parent.children.push(childComponent);
+        }
+      });
+
+      this.server.to(roomCode).emit('childComponentAdded', {
+        parentId,
+        childComponent,
+      });
+
+      console.log(
+        `🧩 Hijo añadido por ${user.email} al componente ${parentId} en página ${pageId}`,
+      );
+    } catch (error) {
+      client.emit('error', { message: error.message });
+    }
   }
-) {
-  try {
-    const { roomCode, pageId, parentId, childComponent } = data;
-    const user = client.data.user;
-
-    await this.canvasSync.updateRoomState(roomCode, (pages) => {
-      const page = pages.find(p => p.id === pageId);
-      if (!page) return;
-
-      const parent = this.findComponentInPage(page, parentId);
-      if (parent) {
-        if (!parent.children) parent.children = [];
-        parent.children.push(childComponent);
-      }
-    });
-
-    this.server.to(roomCode).emit('childComponentAdded', {
-      parentId,
-      childComponent
-    });
-
-    console.log(`🧩 Hijo añadido por ${user.email} al componente ${parentId} en página ${pageId}`);
-  } catch (error) {
-    client.emit('error', { message: error.message });
-  }
-}
-
 
   //remover
   @SubscribeMessage('removeComponent')
   async handleRemoveComponent(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string, pageId: string, componentId: string }
+    @MessageBody()
+    data: { roomCode: string; pageId: string; componentId: string },
   ) {
     try {
       const { roomCode, pageId, componentId } = data;
@@ -334,7 +347,9 @@ async handleAddChildComponent(
       });
 
       client.to(roomCode).emit('componentRemoved', { pageId, componentId });
-      console.log(`🗑️ Componente eliminado por ${user.email} de página ${pageId}`);
+      console.log(
+        `🗑️ Componente eliminado por ${user.email} de página ${pageId}`,
+      );
     } catch (error) {
       client.emit('error', { message: error.message });
     }
@@ -345,14 +360,20 @@ async handleAddChildComponent(
   @SubscribeMessage('moveComponent')
   async handleMoveComponent(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string, pageId: string, componentId: string, newPosition: { left: number, top: number } }
+    @MessageBody()
+    data: {
+      roomCode: string;
+      pageId: string;
+      componentId: string;
+      newPosition: { left: number; top: number };
+    },
   ) {
     try {
       const { roomCode, pageId, componentId, newPosition } = data;
       const user = client.data.user;
-  
+
       await this.canvasSync.updateRoomState(roomCode, (pages) => {
-        const page = pages.find(p => p.id === pageId);
+        const page = pages.find((p) => p.id === pageId);
         if (page) {
           const component = this.findComponentInPage(page, componentId);
           if (component) {
@@ -361,47 +382,58 @@ async handleAddChildComponent(
           }
         }
       });
-  
-      this.server.to(roomCode).emit('componentMoved', { pageId, componentId, newPosition });
-  
-      console.log(`↔️ Movimiento de componente ${componentId} en página ${pageId}`);
+
+      this.server
+        .to(roomCode)
+        .emit('componentMoved', { pageId, componentId, newPosition });
+
+      console.log(
+        `↔️ Movimiento de componente ${componentId} en página ${pageId}`,
+      );
     } catch (error) {
       client.emit('error', { message: error.message });
     }
   }
 
+  @SubscribeMessage('transformComponent')
+  async handleTransformComponent(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomCode: string;
+      componentId: string;
+      newSize: { width: number; height: number };
+    },
+  ) {
+    try {
+      const { roomCode, componentId, newSize } = data;
+      const user = client.data.user;
 
+      await this.canvasSync.updateRoomState(roomCode, (components) => {
+        const component = this.findComponentInArray(components, componentId);
+        if (component) {
+          component.width = newSize.width;
+          component.height = newSize.height;
+        }
+      });
 
-  
-@SubscribeMessage('transformComponent')
-async handleTransformComponent(
-  @ConnectedSocket() client: Socket,
-  @MessageBody() data: { roomCode: string; componentId: string; newSize: { width: number, height: number } },
-) {
-  try {
-    const { roomCode, componentId, newSize } = data;
-    const user = client.data.user;
+      this.server
+        .to(roomCode)
+        .emit('componentTransformed', { componentId, newSize });
 
-    await this.canvasSync.updateRoomState(roomCode, (components) => {
-      const component = this.findComponentInArray(components, componentId);
-      if (component) {
-        component.width = newSize.width;
-        component.height = newSize.height;
-      }
-    });
-
-    this.server.to(roomCode).emit('componentTransformed', { componentId, newSize });
-
-    console.log(`User ${user.email} resized component ${componentId} in room: ${roomCode}`);
-  } catch (error) {
-    client.emit('error', { message: error.message });
+      console.log(
+        `User ${user.email} resized component ${componentId} in room: ${roomCode}`,
+      );
+    } catch (error) {
+      client.emit('error', { message: error.message });
+    }
   }
-}
 
   @SubscribeMessage('updateComponentStyle')
   async handleUpdateComponentStyle(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string; componentId: string; styleUpdates: any },
+    @MessageBody()
+    data: { roomCode: string; componentId: string; styleUpdates: any },
   ) {
     try {
       const { roomCode, componentId, styleUpdates } = data;
@@ -411,62 +443,79 @@ async handleTransformComponent(
         const component = this.findComponentInArray(components, componentId);
         if (component) {
           Object.assign(component.style, styleUpdates);
-          client.to(roomCode).emit('componentStyleUpdated', { componentId, styleUpdates });
+          client
+            .to(roomCode)
+            .emit('componentStyleUpdated', { componentId, styleUpdates });
         }
       });
 
-      console.log(`User ${user.email} updated styles for component ${componentId} in room: ${roomCode}`);
+      console.log(
+        `User ${user.email} updated styles for component ${componentId} in room: ${roomCode}`,
+      );
     } catch (error) {
       client.emit('error', { message: error.message });
     }
   }
 
   @SubscribeMessage('updateComponentProperties')
-  async handleUpdateComponentProperties(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string; pageId: string; componentId: string; updates: any },
-  ) {
-    try {
-      const { roomCode, pageId, componentId, updates } = data;
+async handleUpdateComponentProperties(
+  @ConnectedSocket() client: Socket,
+  @MessageBody()
+  data: {
+    roomCode: string;
+    pageId: string;
+    componentId: string;
+    updates: any;
+  },
+) {
+  try {
+    const { roomCode, pageId, componentId, updates } = data;
 
-      await this.canvasSync.updateRoomState(roomCode, (pages) => {
-        const page = pages.find(p => p.id === pageId);
-        if (!page) return;
+    await this.canvasSync.updateRoomState(roomCode, (pages) => {
+      const page = pages.find((p) => p.id === pageId);
+      if (!page) return;
 
-        const component = this.findComponentInPage(page, componentId);
-        if (component) {
-          if (!component.style) component.style = {};
+      const component = this.findComponentInPage(page, componentId);
+      if (!component) return;
 
-          Object.keys(updates).forEach(key => {
-            if (key === 'content') {
-              component.content = updates[key];
-            } else {
-              component.style[key] = updates[key];
-            }
-          });
+      // Aplicar las actualizaciones correctamente
+      for (const [key, value] of Object.entries(updates)) {
+        const keys = key.split('.');
+        let target = component;
 
-          // Emitir a todos
-          this.server.to(roomCode).emit('componentPropertiesUpdated', {
-            pageId,
-            componentId,
-            updates,
-          });
-          client.emit('componentPropertiesUpdated', {
-            pageId,
-            componentId,
-            updates,
-          });
+        while (keys.length > 1) {
+          const part = keys.shift()!;
+          if (!(part in target)) target[part] = {};
+          target = target[part];
         }
-      });
-    } catch (error) {
-      client.emit('error', { message: error.message });
-    }
+
+        target[keys[0]] = value;
+      }
+
+      // Aquí no hace falta más. El helper ya guarda el JSON en canvasFile
+    });
+
+    // Emitir a todos
+    this.server.to(roomCode).emit('componentPropertiesUpdated', {
+      pageId,
+      componentId,
+      updates,
+    });
+    client.emit('componentPropertiesUpdated', {
+      pageId,
+      componentId,
+      updates,
+    });
+  } catch (error) {
+    client.emit('error', { message: error.message });
   }
+}
+
 
   @SubscribeMessage('addPage')
   async handleAddPage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string, page: any }
+    @MessageBody() data: { roomCode: string; page: any },
   ) {
     try {
       const { roomCode, page } = data;
@@ -476,7 +525,9 @@ async handleTransformComponent(
         pages.push(page); // ← Agregamos página al array de páginas
       });
 
-      client.to(roomCode).emit('pageAdded', page);
+      this.server.to(roomCode).emit('pageAdded', page); // todos en la sala
+      client.emit('pageAdded', page); // también el emisor
+
       console.log(`📄 Nueva página agregada por ${user.email}: ${page.name}`);
     } catch (error) {
       console.error('Error agregando página:', error);
@@ -486,14 +537,14 @@ async handleTransformComponent(
   @SubscribeMessage('removePage')
   async handleRemovePage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string, pageId: string }
+    @MessageBody() data: { roomCode: string; pageId: string },
   ) {
     try {
       const { roomCode, pageId } = data;
       const user = client.data.user;
 
       await this.canvasSync.updateRoomState(roomCode, (pages) => {
-        const index = pages.findIndex(p => p.id === pageId);
+        const index = pages.findIndex((p) => p.id === pageId);
         if (index !== -1) {
           pages.splice(index, 1);
         }
@@ -509,12 +560,12 @@ async handleTransformComponent(
   @SubscribeMessage('requestPage')
   async handleRequestPage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string, pageId: string }
+    @MessageBody() data: { roomCode: string; pageId: string },
   ) {
     try {
       const { roomCode, pageId } = data;
       const pages = await this.canvasSync.getRoomState(roomCode);
-      const page = pages.find(p => p.id === pageId);
+      const page = pages.find((p) => p.id === pageId);
 
       if (page) {
         client.emit('pageData', page); // ⬅️ Nuevo evento 'pageData' para enviar solo esa página
@@ -536,14 +587,14 @@ async handleTransformComponent(
       pageId: string;
       tableId: string;
       children: any[]; // nuevas filas (tr) con sus celdas (td)
-    }
+    },
   ) {
     try {
       const { roomCode, pageId, tableId, children } = data;
       const user = client.data.user;
 
       await this.canvasSync.updateRoomState(roomCode, (pages) => {
-        const page = pages.find(p => p.id === pageId);
+        const page = pages.find((p) => p.id === pageId);
         if (!page) return;
 
         const table = this.findComponentInPage(page, tableId);
@@ -552,12 +603,12 @@ async handleTransformComponent(
         }
       });
 
-      this.server.to(roomCode).emit('tableStructureUpdated', { pageId, tableId, children });
+      this.server
+        .to(roomCode)
+        .emit('tableStructureUpdated', { pageId, tableId, children });
       console.log(`📐 Tabla actualizada por ${user.email}`);
     } catch (error) {
       client.emit('error', { message: error.message });
     }
   }
-
-
 }
