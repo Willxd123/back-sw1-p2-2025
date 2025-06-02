@@ -356,7 +356,6 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
   //movimiento
   // Agrega estos manejadores al RoomsGateway
-
   @SubscribeMessage('moveComponent')
   async handleMoveComponent(
     @ConnectedSocket() client: Socket,
@@ -374,18 +373,23 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       await this.canvasSync.updateRoomState(roomCode, (pages) => {
         const page = pages.find((p) => p.id === pageId);
-        if (page) {
-          const component = this.findComponentInPage(page, componentId);
-          if (component) {
-            component.left = newPosition.left;
-            component.top = newPosition.top;
-          }
+        if (!page) return;
+
+        const component = this.findComponentInPage(page, componentId);
+        if (!component) return;
+
+        // Validar que el componente sea movable
+        if (!component.alignment) {
+          component.left = newPosition.left;
+          component.top = newPosition.top;
         }
       });
 
-      this.server
-        .to(roomCode)
-        .emit('componentMoved', { pageId, componentId, newPosition });
+      this.server.to(roomCode).emit('componentMoved', {
+        pageId,
+        componentId,
+        newPosition,
+      });
 
       console.log(
         `↔️ Movimiento de componente ${componentId} en página ${pageId}`,
@@ -458,59 +462,58 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('updateComponentProperties')
-async handleUpdateComponentProperties(
-  @ConnectedSocket() client: Socket,
-  @MessageBody()
-  data: {
-    roomCode: string;
-    pageId: string;
-    componentId: string;
-    updates: any;
-  },
-) {
-  try {
-    const { roomCode, pageId, componentId, updates } = data;
+  async handleUpdateComponentProperties(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomCode: string;
+      pageId: string;
+      componentId: string;
+      updates: any;
+    },
+  ) {
+    try {
+      const { roomCode, pageId, componentId, updates } = data;
 
-    await this.canvasSync.updateRoomState(roomCode, (pages) => {
-      const page = pages.find((p) => p.id === pageId);
-      if (!page) return;
+      await this.canvasSync.updateRoomState(roomCode, (pages) => {
+        const page = pages.find((p) => p.id === pageId);
+        if (!page) return;
 
-      const component = this.findComponentInPage(page, componentId);
-      if (!component) return;
+        const component = this.findComponentInPage(page, componentId);
+        if (!component) return;
 
-      // Aplicar las actualizaciones correctamente
-      for (const [key, value] of Object.entries(updates)) {
-        const keys = key.split('.');
-        let target = component;
+        // Aplicar las actualizaciones correctamente
+        for (const [key, value] of Object.entries(updates)) {
+          const keys = key.split('.');
+          let target = component;
 
-        while (keys.length > 1) {
-          const part = keys.shift()!;
-          if (!(part in target)) target[part] = {};
-          target = target[part];
+          while (keys.length > 1) {
+            const part = keys.shift()!;
+            if (!(part in target)) target[part] = {};
+            target = target[part];
+          }
+
+          target[keys[0]] = value;
         }
 
-        target[keys[0]] = value;
-      }
+        // Aquí no hace falta más. El helper ya guarda el JSON en canvasFile
+      });
 
-      // Aquí no hace falta más. El helper ya guarda el JSON en canvasFile
-    });
-
-    // Emitir a todos
-    this.server.to(roomCode).emit('componentPropertiesUpdated', {
-      pageId,
-      componentId,
-      updates,
-    });
-    client.emit('componentPropertiesUpdated', {
-      pageId,
-      componentId,
-      updates,
-    });
-  } catch (error) {
-    client.emit('error', { message: error.message });
+      // Emitir a todos
+      this.server.to(roomCode).emit('componentPropertiesUpdated', {
+        pageId,
+        componentId,
+        updates,
+      });
+      client.emit('componentPropertiesUpdated', {
+        pageId,
+        componentId,
+        updates,
+      });
+    } catch (error) {
+      client.emit('error', { message: error.message });
+    }
   }
-}
-
 
   @SubscribeMessage('addPage')
   async handleAddPage(
