@@ -245,22 +245,26 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return search(page.components || []);
   }
 
-  private removeComponentFromPage(page: any, componentId: string): boolean {
-    const remove = (components: any[]): boolean => {
+  private removeComponentFromPage(page: any, componentId: string): any | null {
+    const remove = (components: any[]): any | null => {
       const index = components.findIndex((c) => c.id === componentId);
       if (index !== -1) {
+        const removedComponent = components[index];
         components.splice(index, 1);
-        return true;
+        return removedComponent;
       }
       for (const comp of components) {
-        if (comp.children && remove(comp.children)) {
-          return true;
+        if (comp.children) {
+          const removed = remove(comp.children);
+          if (removed) return removed;
         }
       }
-      return false;
+      return null;
     };
     return remove(page.components || []);
   }
+  
+  
 
   //agregar componentes
   @SubscribeMessage('addComponent')
@@ -338,22 +342,29 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { roomCode, pageId, componentId } = data;
       const user = client.data.user;
-
+  
+      let removedComponent: any = null;
+  
       await this.canvasSync.updateRoomState(roomCode, (pages) => {
         const page = this.findPageById(pages, pageId);
         if (page) {
-          this.removeComponentFromPage(page, componentId);
+          removedComponent = this.removeComponentFromPage(page, componentId);
         }
       });
-
-      client.to(roomCode).emit('componentRemoved', { pageId, componentId });
-      console.log(
-        `🗑️ Componente eliminado por ${user.email} de página ${pageId}`,
-      );
+  
+      this.server.to(roomCode).emit('componentRemoved', { pageId, componentId });
+  
+      console.log(`🗑️ Componente eliminado por ${user.email} de página ${pageId}`);
+      if (removedComponent) {
+        console.log(`🔎 Componente eliminado:`, removedComponent);
+      } else {
+        console.warn(`⚠️ No se encontró el componente con id ${componentId} en página ${pageId}`);
+      }
     } catch (error) {
       client.emit('error', { message: error.message });
     }
   }
+  
   //movimiento
   // Agrega estos manejadores al RoomsGateway
   @SubscribeMessage('moveComponent')
