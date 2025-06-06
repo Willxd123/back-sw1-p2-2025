@@ -54,7 +54,7 @@ export class ExportService {
 
       await mkdirAsync(pageFolderPath, { recursive: true });
 
-      const dartFilePath = path.join(
+      const fullDartPath = path.join(
         pageFolderPath,
         `${pageFolderName}_page.dart`,
       );
@@ -62,7 +62,7 @@ export class ExportService {
         pageClassName,
         page.components,
       );
-      await writeFileAsync(dartFilePath, dartContent);
+      await writeFileAsync(fullDartPath, dartContent);
 
       routeImports += `import '../pages/${pageFolderName}/${pageFolderName}_page.dart';\n`;
       routeMappings += `  '/${pageFolderName}': (context) => const ${pageClassName}(),\n`;
@@ -89,23 +89,27 @@ export class ExportService {
   }
 
   /**
-   * 1) Esta función detecta si hay un AppBar en "components" y lo mueve a Scaffold.appBar.
-   * 2) El resto de componentes se dibujan en body: Stack([...]).
+   * 1) Detección de AppBar → lo lleva a Scaffold.appBar.
+   * 2) Detecta si existe al menos un DropdownButton para decidir Stateless vs Stateful.
+   * 3) El resto de componentes se dibujan en body: Stack([...]).
    */
   private generateFlutterPageDart(
     className: string,
     components: any[],
   ): string {
-    // Buscamos un componente tipo 'AppBar' (si existe, tomamos solo el primero)
+    // Buscar AppBar (solo el primero)
     const appBarComp = components.find((c) => c.type === 'AppBar');
 
-    // Los componentes que NO sean 'AppBar' van al Stack
+    // Detectar recursivamente si existe algún DropdownButton
+    const hasDropdown = this.containsDropdown(components);
+
+    // Generar cuerpo (sin AppBar) como lista de strings
     const bodyComponents = components
       .filter((c) => c.type !== 'AppBar')
       .map((comp) => this.generateFlutterWidget(comp))
       .join(',\n\n');
 
-    // Generamos la sección appBar (o un appBar vacío si no existe ningún componente de ese tipo)
+    // Construir appBarDart (vacío o con valores del JSON)
     let appBarDart = `appBar: AppBar(
         backgroundColor: Color(0xFF2196f3),
         title: const Text(''),
@@ -113,16 +117,22 @@ export class ExportService {
       ),`;
 
     if (appBarComp) {
-      // Si hay un AppBar en tu JSON, extraemos el texto del primer hijo 'Text'
       let titulo = '';
-      if (Array.isArray(appBarComp.children) && appBarComp.children.length > 0) {
-        const textChild = appBarComp.children.find((ch: any) => ch.type === 'Text');
+      if (
+        Array.isArray(appBarComp.children) &&
+        appBarComp.children.length > 0
+      ) {
+        const textChild = appBarComp.children.find(
+          (ch: any) => ch.type === 'Text',
+        );
         if (textChild) {
           titulo = (textChild.text ?? '').replace(/'/g, "\\'");
         }
       }
-      // Armamos el AppBar con el color que venga en decoration y el título correspondiente
-      const colorHex = (appBarComp.decoration?.color ?? '#2196f3').replace('#', '');
+      const colorHex = (appBarComp.decoration?.color ?? '#2196f3').replace(
+        '#',
+        '',
+      );
       appBarDart = `appBar: AppBar(
         backgroundColor: Color(0xFF${colorHex}),
         title: const Text('${titulo}'),
@@ -130,7 +140,9 @@ export class ExportService {
       ),`;
     }
 
-    return `import 'package:flutter/material.dart';
+    // Si no hay DropdownButton, generamos StatelessWidget
+    if (!hasDropdown) {
+      return `import 'package:flutter/material.dart';
 
 class ${className} extends StatelessWidget {
   const ${className}({super.key});
@@ -150,22 +162,92 @@ ${bodyComponents
     );
   }
 }`;
+    }
+
+    // Si hay DropdownButton, generamos StatefulWidget y el mapa _dropdownValues
+    return `import 'package:flutter/material.dart';
+
+class ${className} extends StatefulWidget {
+  const ${className}({super.key});
+
+  @override
+  State<${className}> createState() => _${className}State();
+}
+
+class _${className}State extends State<${className}> {
+  final Map<String, String> _dropdownValues = {};
+
+  @override
+  void initState() {
+    super.initState();
+    ${this.buildDropdownInitializers(components)}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      ${appBarDart}
+      body: Stack(
+        children: [
+${bodyComponents
+  .split('\n')
+  .map((line) => '          ' + line)
+  .join('\n')}
+        ],
+      ),
+    );
+  }
+}`;
   }
 
   /**
-   * Esta función genera cada widget (Positioned o Align) según el tipo:
-   * - AppBar → NO entra aquí, porque lo sacamos en generateFlutterPageDart.
-   * - Text → Si viene con decoration.color distinto de "transparent", lo envuelve en Container con BoxDecoration y Center(Text).
-   *            Si viene "transparent", genera solo un Text(...) simple.
-   * - IconButton → Genera Container con IconButton, y si tiene hijos Text, los superpone (en blanco semitransparente) encima.
-   * - Container → Genera Container con o sin children (anidados en Stack).
+   * Revisa recursivamente si hay un DropdownButton en la lista de componentes.
+   */
+  private containsDropdown(comps: any[]): boolean {
+    for (const c of comps) {
+      if (c.type === 'DropdownButton') return true;
+      if (Array.isArray(c.children) && c.children.length > 0) {
+        if (this.containsDropdown(c.children)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Recorre los componentes para generar las líneas de initState() que asignan
+   * cada _dropdownValues['id'] = 'selectedOption';
+   */
+  private buildDropdownInitializers(components: any[]): string {
+    const lines: string[] = [];
+    components.forEach((c) => {
+      if (c.type === 'DropdownButton') {
+        const id = c.id;
+        const firstOption =
+          Array.isArray(c.options) && c.options.length > 0
+            ? c.options[0].replace(/'/g, "\\'")
+            : '';
+        const selected = (c.selectedOption ?? firstOption).replace(/'/g, "\\'");
+        lines.push(`_dropdownValues['${id}'] = '${selected}';`);
+      }
+      if (Array.isArray(c.children) && c.children.length > 0) {
+        lines.push(this.buildDropdownInitializers(c.children));
+      }
+    });
+    return lines.join('\n    ');
+  }
+
+  /**
+   * Genera cada widget (Positioned, Align, Text, IconButton, DropdownButton o Container).
    */
   private generateFlutterWidget(comp: any): string {
     // 1) Propiedades comunes
     const width = comp.width ?? 50;
     const height = comp.height ?? 50;
     const color = (comp.decoration?.color ?? '#ffffff').replace('#', '');
-    const borderColor = (comp.decoration?.border?.color ?? '#000000').replace('#', '');
+    const borderColor = (comp.decoration?.border?.color ?? '#000000').replace(
+      '#',
+      '',
+    );
     const borderWidth = comp.decoration?.border?.width ?? 0;
     const borderRadius = comp.decoration?.borderRadius ?? 0;
 
@@ -178,67 +260,68 @@ ${bodyComponents
       borderRadius: BorderRadius.circular(${borderRadius}),
     )`;
 
-    // 2) Caso AppBar: NO se renderiza aquí, ya lo quitamos en generateFlutterPageDart
+    // 2) AppBar → no se maneja aquí
     if (comp.type === 'AppBar') {
-      return ''; // nunca debería caer aquí
+      return '';
     }
 
-    // 3) Caso Text suelto (o hijo de Container/IconButton) 
+    // 3) Text
     if (comp.type === 'Text') {
       const rawText = (comp.text ?? '').replace(/'/g, "\\'");
       const fontSize = comp.fontSize ?? 14;
+      const textColor =
+        comp.textColor && comp.textColor !== 'transparent'
+          ? comp.textColor.replace('#', '')
+          : '000000';
 
-      // Si el JSON indica color distinto de "transparent", lo envolvemos en Container + Center(Text)
-      const textDecoColor = (comp.decoration?.color ?? 'transparent').toLowerCase();
-      if (textDecoColor !== 'transparent' && textDecoColor !== '#transparent') {
-        // Extraemos color real del Text-container
-        const textBgColor = textDecoColor.replace('#', '');
-        return `
-Positioned(
-  top: ${comp.top ?? 0},
-  left: ${comp.left ?? 0},
-  child: Container(
-    width: ${comp.width},
-    height: ${comp.height},
-    decoration: BoxDecoration(
-      color: Color(0xFF${textBgColor}),
-      border: Border.all(
-        color: Color(0xFF${borderColor}),
-        width: ${comp.decoration?.border?.width ?? 0},
-      ),
-      borderRadius: BorderRadius.circular(${comp.decoration?.borderRadius ?? 0}),
-    ),
-    child: const Center(
-      child: Text(
-        '${rawText}',
-        style: TextStyle(
-          fontSize: ${fontSize},
-          color: Color(0xFFFFFFFF),
-        ),
-      ),
-    ),
-  ),
-)
-        `.trim();
+      // Sanitizar fontFamily para que quede 'Times New Roman, serif'
+      let fontFamilyValue: string | null = null;
+      if (comp.fontFamily) {
+        fontFamilyValue = comp.fontFamily.trim().replace(/^['"]|['"]$/g, '');
       }
 
-      // Si es transparente, generamos solo Text sin contenedor:
-      const textColor = (comp.decoration?.color ?? '#000000').replace('#', '');
-      const innerTextWidget = `
+      // Alineación interna del Text
+      const textAlignDart = (() => {
+        switch (comp.textAlign) {
+          case 'center':
+            return 'TextAlign.center';
+          case 'right':
+            return 'TextAlign.right';
+          case 'justify':
+            return 'TextAlign.justify';
+          default:
+            return 'TextAlign.left';
+        }
+      })();
+
+      // Construir Text(...)
+      const textWidget = `
 Text(
   '${rawText}',
+  textAlign: ${textAlignDart},
   style: TextStyle(
     fontSize: ${fontSize},
-    color: Color(0xFF${textColor}),
+    color: Color(0xFF${textColor}),${fontFamilyValue ? `\n    fontFamily: '${fontFamilyValue}',` : ''}
   ),
 )
       `.trim();
 
+      // Envolver en Container(width, height, alignment)
+      const containerWrapper = `
+Container(
+  width: ${comp.width},
+  height: ${comp.height},
+  alignment: Alignment.center,
+  child: ${textWidget},
+)
+      `.trim();
+
+      // Posicionar con Align o Positioned según comp.alignment
       if (comp.alignment) {
         return `
 Align(
   alignment: Alignment.${comp.alignment},
-  child: ${innerTextWidget},
+  child: ${containerWrapper},
 )
         `.trim();
       } else {
@@ -246,19 +329,18 @@ Align(
 Positioned(
   top: ${comp.top ?? 0},
   left: ${comp.left ?? 0},
-  child: ${innerTextWidget},
+  child: ${containerWrapper},
 )
         `.trim();
       }
     }
 
-    // 4) Caso IconButton (con posibles hijos Text superpuestos)
+    // 4) IconButton (con posible Text hijo superpuesto)
     if (comp.type === 'IconButton') {
       const tooltip = (comp.tooltip ?? '').replace(/'/g, "\\'");
       const icon = comp.icon ?? 'help_outline';
       const route = comp.navigateTo ?? '/';
 
-      // 4.1. El widget principal
       const iconButtonWidget = `
 IconButton(
   tooltip: '${tooltip}',
@@ -269,14 +351,12 @@ IconButton(
 )
       `.trim();
 
-      // 4.2. Si tiene hijos (solo Text), los superponemos en color semitransparente blanco (0x80FFFFFF)
+      // Si tiene hijos (Text), los superponemos
       let childrenStack = '';
       if (Array.isArray(comp.children) && comp.children.length > 0) {
-        // Iteramos cada hijo de tipo 'Text'
         const mappedChildren = comp.children.map((child: any) => {
           const rawText = (child.text ?? '').replace(/'/g, "\\'");
           const fontSize = child.fontSize ?? 14;
-          // Usamos color semitransparente blanco fijo para los textos dentro de IconButton
           const textoWidget = `
 Text(
   '${rawText}',
@@ -304,7 +384,6 @@ Positioned(
             `.trim();
           }
         });
-
         childrenStack = `
 child: Stack(
   children: [
@@ -314,7 +393,6 @@ child: Stack(
         `.trim();
       }
 
-      // 4.3. Construimos el Container final para este IconButton
       const containerWithChildren = childrenStack
         ? `
 Container(
@@ -338,7 +416,6 @@ Container(
 )
         `.trim();
 
-      // 4.4. Posicionamos o alineamos según comp.alignment
       if (comp.alignment) {
         return `
 Align(
@@ -357,17 +434,65 @@ Positioned(
       }
     }
 
-    // 5) Caso Container (genérico, con posibles children)
+    // 5) DropdownButton
+    if (comp.type === 'DropdownButton') {
+      const optionsArray = Array.isArray(comp.options) ? comp.options : [];
+      const optionsList = optionsArray
+        .map((opt: string) => `'${opt.replace(/'/g, "\\'")}'`)
+        .join(', ');
+
+      const dropdownWidget = `
+DropdownButton<String>(
+  value: _dropdownValues['${comp.id}'],
+  items: <String>[${optionsList}]
+    .map<DropdownMenuItem<String>>((String value) {
+      return DropdownMenuItem<String>(
+        value: value,
+        child: Text(value),
+      );
+    }).toList(),
+  onChanged: (String? newValue) {
+    setState(() {
+      _dropdownValues['${comp.id}'] = newValue!;
+    });
+  },
+)
+      `.trim();
+
+      const containerWithDropdown = `
+Container(
+  width: ${width},
+  height: ${height},
+  decoration: ${decoration},
+  child: Center(child: ${dropdownWidget}),
+)
+      `.trim();
+
+      if (comp.alignment) {
+        return `
+Align(
+  alignment: Alignment.${comp.alignment},
+  child: ${containerWithDropdown},
+)
+        `.trim();
+      } else {
+        return `
+Positioned(
+  top: ${comp.top ?? 0},
+  left: ${comp.left ?? 0},
+  child: ${containerWithDropdown},
+)
+        `.trim();
+      }
+    }
+
+    // 6) Container genérico (puede tener children)
     if (comp.type === 'Container') {
       let childrenStack = '';
       if (Array.isArray(comp.children) && comp.children.length > 0) {
-        // Cada hijo lo generamos recursivamente
-        const mappedChildren = comp.children.map((child: any) => {
-          // IMPORTANTE: cuando generateFlutterWidget recibe un Text que tiene color ≠ transparent,
-          // ya lo envolverá en su propio Container (con fondo y center), según la lógica anterior.
-          // Si dentro de este Container viene otro Container, se anidará recursivamente.
-          return this.generateFlutterWidget(child);
-        });
+        const mappedChildren = comp.children.map((child: any) =>
+          this.generateFlutterWidget(child),
+        );
         childrenStack = `
 child: Stack(
   children: [
@@ -412,7 +537,7 @@ Positioned(
       }
     }
 
-    // 6) Cualquier otro tipo: fallback a un Container vacío
+    // 7) Fallback: un Container vacío
     const fallback = `
 Container(
   width: ${width},
@@ -437,6 +562,45 @@ Positioned(
 )
       `.trim();
     }
+// para el checkbox;
+if (comp.type === 'Checkbox') {
+  const top = comp.top ?? 0;
+  const left = comp.left ?? 0;
+  const fontSize = comp.fontSize ?? 14;
+  const label = (comp.text ?? '').replace(/'/g, "\\'");
+  const checkVar = `_${comp.id}_checked`;
+
+  return `
+Positioned(
+  top: ${top},
+  left: ${left},
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Checkbox(
+        value: ${checkVar},
+        onChanged: (bool? value) {
+          setState(() {
+            ${checkVar} = value!;
+          });
+        },
+      ),
+      Flexible(
+        child: Text(
+          '${label}',
+          style: TextStyle(
+            fontSize: ${fontSize},
+          ),
+        ),
+      ),
+    ],
+  ),
+)
+  `.trim();
+}
+
+    
   }
 
   private replaceRoutes(
@@ -444,15 +608,27 @@ Positioned(
     imports: string,
     routes: string,
   ): string {
-    const importPart = original
-      .replace(/import\s+['\"][^'\"]+['\"];?/g, '')
+    const withoutPageImports = original
+      .replace(/import\s+'\.\.\/pages\/[^']+\/[^']+\.dart';?\s*/g, '')
       .trim();
-    return `${imports.trim()}
 
-${importPart.replace(
+    let header = '';
+    if (
+      !withoutPageImports.includes(`import 'package:flutter/material.dart';`)
+    ) {
+      header = `import 'package:flutter/material.dart';\n`;
+    }
+
+    const newContent = `
+${header}${imports.trim()}
+
+${withoutPageImports.replace(
   /final Map<String, WidgetBuilder> appRoutes = \{[^}]*\};/s,
   `final Map<String, WidgetBuilder> appRoutes = {\n${routes.trim()}};`,
-)}`;
+)}
+`.trim();
+
+    return newContent;
   }
 
   private async zipDirectory(
