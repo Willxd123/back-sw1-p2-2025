@@ -173,6 +173,18 @@ ${bodyComponents
 }`;
     }
 
+    // Generar inicializadores solo si hay componentes con estado
+    const stateInitializers = this.buildStateInitializers(components);
+    const initStateContent =
+      stateInitializers.trim() === ''
+        ? ''
+        : `
+  @override
+  void initState() {
+    super.initState();
+    ${stateInitializers}
+  }`;
+
     // Si hay componentes con estado, generamos StatefulWidget
     return `import 'package:flutter/material.dart';
 
@@ -185,13 +197,7 @@ class ${className} extends StatefulWidget {
 
 class _${className}State extends State<${className}> {
   final Map<String, String> _dropdownValues = {};
-  final Map<String, bool> _checkboxValues = {};
-
-  @override
-  void initState() {
-    super.initState();
-    ${this.buildStateInitializers(components)}
-  }
+  final Map<String, bool> _checkboxValues = {};${initStateContent}
 
   @override
   Widget build(BuildContext context) {
@@ -241,10 +247,7 @@ ${bodyComponents
   }
 
   /**
-   * Genera cada widget Flutter
-   */
-  /**
-   * Genera cada widget Flutter - VERSIÓN CORREGIDA
+   * Genera cada widget Flutter - VERSIÓN CORREGIDA PARA CHECKBOX
    */
   private generateFlutterWidget(comp: any): string {
     // 1) Propiedades comunes de tamaño y decoración
@@ -349,190 +352,275 @@ ${bodyComponents
       }
     }
 
-    // 4) IconButton
-    if (comp.type === 'IconButton') {
-      const tooltip = (comp.tooltip ?? '').replace(/'/g, "\\'");
-      const icon = comp.icon ?? 'help_outline';
-      const route = comp.navigateTo ?? '/';
+    // 4) TextButton
+    // Reemplaza la sección de TextButton en el método generateFlutterWidget
 
-      // Generar IconButton
-      const iconButtonWidget = `IconButton(
-      tooltip: '${tooltip}',
-      icon: Icon(Icons.${icon}),
-      onPressed: () {
-        Navigator.pushNamed(context, '${route}');
-      },
+    // Reemplaza la sección de TextButton en el método generateFlutterWidget
+
+// 4) TextButton
+if (comp.type === 'TextButton') {
+  // 1. Preparar texto y estilo
+  const label = (comp.text ?? '').replace(/'/g, "\\'");
+  const fontSize = comp.fontSize ?? 16;
+  const textColor = (comp.textColor ?? '#000000').replace('#', '');
+  const fontFamilyValue =
+    comp.fontFamily && comp.fontFamily !== 'inherit'
+      ? comp.fontFamily.trim().replace(/^['"]|['"]$/g, '')
+      : null;
+
+  // 2. Alineación de texto en Dart
+  const textAlignDart = (() => {
+    switch (comp.textAlign) {
+      case 'center':
+        return 'TextAlign.center';
+      case 'right':
+        return 'TextAlign.right';
+      case 'justify':
+        return 'TextAlign.justify';
+      default:
+        return 'TextAlign.left';
+    }
+  })();
+
+  // 3. Ruta de navegación
+  const route = comp.navigateTo ?? '/';
+
+  // 4. Construir el widget TextButton envuelto en SizedBox para forzar dimensiones exactas
+  const buttonWidget = `SizedBox(
+    width: ${width}.0,
+    height: ${height}.0,
+    child: TextButton(
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.all(4.0), // Padding mínimo para que el texto pueda acercarse a los bordes
+        backgroundColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(${borderRadius}.0),
+          side: BorderSide(color: Color(0xFF${borderColor}), width: ${borderWidth}.0),
+        ),
+      ),
+      onPressed: () => Navigator.pushNamed(context, '${route}'),
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
+        child: Center(
+          child: Text(
+            '${label}',
+            textAlign: ${textAlignDart},
+            softWrap: true, // Permitir que el texto se ajuste en múltiples líneas
+            overflow: TextOverflow.visible, // Permitir que el texto sea visible completamente
+            maxLines: null, // Sin límite de líneas
+            style: TextStyle(
+              fontSize: ${fontSize}.0,
+              color: Color(0xFF${textColor}),
+              height: 1.0, // Espaciado entre líneas más compacto
+              ${fontFamilyValue ? `fontFamily: '${fontFamilyValue}',` : ''}
+            ),
+          ),
+        ),
+      ),
+    ),
+  )`;
+
+  // 5. Posicionar o alinear según `comp.alignment`
+  if (comp.alignment) {
+    return `Align(
+      alignment: Alignment.${comp.alignment},
+      child: ${buttonWidget},
     )`;
+  } else {
+    return `Positioned(
+      top: ${comp.top ?? 0}.0,
+      left: ${comp.left ?? 0}.0,
+      child: ${buttonWidget},
+    )`;
+  }
+}
+    // … continúa con Checkbox, DropdownButton, etc. …
+// 5) TextField
+if (comp.type === 'TextField') {
+  // Propiedades específicas del TextField
+  const hintText = (comp.hintText ?? '').replace(/'/g, "\\'");
+  const labelText = (comp.labelText ?? '').replace(/'/g, "\\'");
+  const fontSize = comp.fontSize ?? 16;
+  const inputTextColor = (comp.inputTextColor ?? '#212121').replace('#', '');
+  const hintColor = (comp.hintColor ?? '#9e9e9e').replace('#', '');
+  const labelColor = (comp.labelColor ?? '#757575').replace('#', '');
+  const focusedBorderColor = (comp.focusedBorderColor ?? '#2196f3').replace('#', '');
+  const borderType = comp.borderType ?? 'outline';
+  const enabled = comp.enabled ?? true;
+  const inputType = comp.inputType ?? 'text';
 
-      // Si tiene hijos (Text), los superponemos
-      let childrenWidgets = '';
-      if (Array.isArray(comp.children) && comp.children.length > 0) {
-        const mappedChildren = comp.children
-          .map((child: any) => this.generateFlutterWidget(child))
-          .filter((widget) => widget.trim() !== '')
-          .join(',\n        ');
+  // Determinar el tipo de teclado
+  const keyboardType = (() => {
+    switch (inputType) {
+      case 'number':
+        return 'TextInputType.number';
+      case 'email':
+        return 'TextInputType.emailAddress';
+      case 'phone':
+        return 'TextInputType.phone';
+      case 'multiline':
+        return 'TextInputType.multiline';
+      default:
+        return 'TextInputType.text';
+    }
+  })();
 
-        if (mappedChildren) {
-          childrenWidgets = `,
-        ${mappedChildren}`;
-        }
-      }
-
-      // Contenedor con decoración
-      const containerWithButton = `Container(
-      width: ${width},
-      height: ${height},
-      ${decoration ? `decoration: ${decoration},` : ''}
-      child: ${
-        comp.children && comp.children.length > 0
-          ? `Stack(
-        children: [
-          Center(child: ${iconButtonWidget})${childrenWidgets}
-        ],
+  // Crear el InputDecoration basado en borderType
+  const inputDecoration = borderType === 'outline' 
+    ? `InputDecoration(
+        hintText: '${hintText}',
+        ${labelText ? `labelText: '${labelText}',` : ''}
+        hintStyle: TextStyle(color: Color(0xFF${hintColor})),
+        ${labelText ? `labelStyle: TextStyle(color: Color(0xFF${labelColor})),` : ''}
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(${borderRadius}.0),
+          borderSide: BorderSide(
+            color: Color(0xFF${borderColor}),
+            width: ${borderWidth}.0,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(${borderRadius}.0),
+          borderSide: BorderSide(
+            color: Color(0xFF${focusedBorderColor}),
+            width: 2.0,
+          ),
+        ),
+        filled: true,
+        fillColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
       )`
-          : `Center(child: ${iconButtonWidget})`
+    : `InputDecoration(
+        hintText: '${hintText}',
+        ${labelText ? `labelText: '${labelText}',` : ''}
+        hintStyle: TextStyle(color: Color(0xFF${hintColor})),
+        ${labelText ? `labelStyle: TextStyle(color: Color(0xFF${labelColor})),` : ''}
+        border: UnderlineInputBorder(
+          borderSide: BorderSide(
+            color: Color(0xFF${borderColor}),
+            width: ${borderWidth}.0,
+          ),
+        ),
+        focusedBorder: UnderlineInputBorder(
+          borderSide: BorderSide(
+            color: Color(0xFF${focusedBorderColor}),
+            width: 2.0,
+          ),
+        ),
+        filled: true,
+        fillColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
+      )`;
+
+  // Construir el widget TextField
+  const textFieldWidget = `SizedBox(
+    width: ${width}.0,
+    height: ${height}.0,
+    child: TextField(
+      enabled: ${enabled},
+      keyboardType: ${keyboardType},
+      ${inputType === 'multiline' ? 'maxLines: null,' : ''}
+      style: TextStyle(
+        fontSize: ${fontSize}.0,
+        color: Color(0xFF${inputTextColor}),
+      ),
+      decoration: ${inputDecoration},
+      onChanged: (String value) {
+        // Aquí puedes agregar lógica para manejar el cambio de valor
       },
+    ),
+  )`;
+
+  // Posicionar o alinear según `comp.alignment`
+  if (comp.alignment) {
+    return `Align(
+      alignment: Alignment.${comp.alignment},
+      child: ${textFieldWidget},
     )`;
+  } else {
+    return `Positioned(
+      top: ${comp.top ?? 0}.0,
+      left: ${comp.left ?? 0}.0,
+      child: ${textFieldWidget},
+    )`;
+  }
+}
+    // 5) Checkbox - USANDO WIDGET NATIVO CON TRANSFORM.SCALE
+    if (comp.type === 'Checkbox') {
+      // Propiedades específicas del checkbox
+      const scale = comp.scale || 1;
+      const checkColor = (comp.checkColor ?? '#FF0000').replace('#', '');
+      const activeColor = (comp.activeColor ?? '#FFFF00').replace('#', '');
+      const borderColor = (
+        comp.borderColor ??
+        comp.checkColor ??
+        '#FF0000'
+      ).replace('#', '');
+      const borderWidth = comp.borderWidth ?? 1;
+      const borderRadius = comp.borderRadius ?? 4;
+
+      // Determinar la forma del checkbox
+      const shapeWidget =
+        borderRadius === 50
+          ? `CircleBorder(
+        side: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth}.0,
+        ),
+      )`
+          : `RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(${borderRadius}.0),
+        side: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth}.0,
+        ),
+      )`;
+
+      // Crear el widget Checkbox nativo escalado
+      const checkboxWidget = `Transform.scale(
+    scale: ${scale},
+    child: Checkbox(
+      value: _checkboxValues['${comp.id}'] ?? false,
+      activeColor: Color(0xFF${activeColor}),
+      checkColor: Color(0xFF${checkColor}),
+      side: BorderSide(
+        color: Color(0xFF${borderColor}),
+        width: ${borderWidth}.0,
+      ),
+      shape: ${shapeWidget},
+      onChanged: (bool? value) {
+        setState(() {
+          _checkboxValues['${comp.id}'] = value ?? false;
+        });
+      },
+    ),
+  )`;
+
+      // Contenedor principal
+      const container = `Container(
+    width: ${width}.0,
+    height: ${height}.0,
+    color: Colors.transparent,
+    child: Center(
+      child: ${checkboxWidget},
+    ),
+  )`;
 
       // Posicionar o alinear
       if (comp.alignment) {
         return `Align(
-        alignment: Alignment.${comp.alignment},
-        child: ${containerWithButton},
-      )`;
-      } else {
-        return `Positioned(
-        top: ${comp.top ?? 0},
-        left: ${comp.left ?? 0},
-        child: ${containerWithButton},
-      )`;
-      }
-    }
-
-    // 5) Checkbox - VERSIÓN CORREGIDA
-    // 5) Checkbox - VERSIÓN CORREGIDA COMPLETA
-if (comp.type === 'Checkbox') {
-  // Usar las propiedades específicas del checkbox personalizado
-  const baseSize = comp.checkSize || 24;
-  const scale = comp.scale || 1;
-  const scaledSize = baseSize * scale;
-  
-  // Colores específicos del checkbox
-  const checkColor = (comp.checkColor ?? '#FF0000').replace('#', '');
-  const activeColor = (comp.activeColor ?? '#FFFF00').replace('#', '');
-  const borderColor = (comp.borderColor ?? comp.checkColor ?? '#FF0000').replace('#', '');
-  
-  // Propiedades del borde y forma
-  const checkBorderWidth = comp.borderWidth ?? 1;
-  const checkBorderRadius = comp.borderRadius ?? 4;
-  
-  // Propiedades de la etiqueta (si existe)
-  const labelText = (comp.text ?? '').replace(/'/g, "\\'");
-  const labelGap = comp.labelGap ?? 8;
-  const labelPosition = comp.labelPosition ?? 'right';
-  const fontSize = comp.fontSize ?? 14;
-  const textColor = (comp.textColor ?? '#000000').replace('#', '');
-  
-  // Determinar si es layout horizontal o vertical
-  const isRow = labelPosition === 'left' || labelPosition === 'right';
-  const dirWidget = isRow ? 'Row' : 'Column';
-  
-  // Crear el checkbox visual personalizado
-  const checkboxWidget = `Container(
-    width: ${scaledSize},
-    height: ${scaledSize},
-    decoration: BoxDecoration(
-      color: _checkboxValues['${comp.id}'] == true 
-        ? Color(0xFF${activeColor}) 
-        : Colors.white,
-      border: Border.all(
-        color: Color(0xFF${borderColor}),
-        width: ${checkBorderWidth},
-      ),
-      borderRadius: BorderRadius.circular(${checkBorderRadius === 50 ? scaledSize / 2 : checkBorderRadius}),
-    ),
-    child: _checkboxValues['${comp.id}'] == true
-      ? Center(
-          child: Text(
-            '✓',
-            style: TextStyle(
-              color: Color(0xFF${checkColor}),
-              fontSize: ${scaledSize * 0.6},
-              fontWeight: FontWeight.bold,
-              height: 1,
-            ),
-          ),
-        )
-      : null,
-  )`;
-  
-  // Envolver en GestureDetector para manejar clicks
-  const clickableCheckbox = `GestureDetector(
-    onTap: () => setState(() => 
-      _checkboxValues['${comp.id}'] = !(_checkboxValues['${comp.id}'] ?? false)
-    ),
-    child: ${checkboxWidget},
-  )`;
-  
-  // Si hay texto de etiqueta, crear el widget de texto
-  let content = clickableCheckbox;
-  if (labelText.trim() !== '') {
-    const textWidget = `Flexible(
-      child: Text(
-        '${labelText}',
-        style: TextStyle(
-          fontSize: ${fontSize},
-          color: Color(0xFF${textColor}),
-        ),
-        overflow: TextOverflow.ellipsis,
-        maxLines: 2,
-      ),
-    )`;
-    
-    const spacerWidget = isRow
-      ? `SizedBox(width: ${labelGap})`
-      : `SizedBox(height: ${labelGap})`;
-    
-    // Orden de hijos según labelPosition
-    let childrenOrder: string[] = [];
-    if (labelPosition === 'left' || labelPosition === 'top') {
-      childrenOrder = [textWidget, spacerWidget, clickableCheckbox];
-    } else {
-      childrenOrder = [clickableCheckbox, spacerWidget, textWidget];
-    }
-    
-    // Componer Row/Column con los hijos
-    content = `${dirWidget}(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        ${childrenOrder.join(',\n        ')},
-      ],
-    )`;
-  }
-  
-  // Contenedor principal - usar las dimensiones originales del componente
-  const container = `Container(
-    width: ${width},
-    height: ${height},
-    padding: const EdgeInsets.all(4.0),
-    child: Center(child: ${content}),
-  )`;
-  
-  // Posicionar o alinear
-  if (comp.alignment) {
-    return `Align(
       alignment: Alignment.${comp.alignment},
       child: ${container},
     )`;
-  } else {
-    return `Positioned(
-      top: ${comp.top ?? 0},
-      left: ${comp.left ?? 0},
+      } else {
+        return `Positioned(
+      top: ${comp.top ?? 0}.0,
+      left: ${comp.left ?? 0}.0,
       child: ${container},
     )`;
-  }
-}
+      }
+    }
 
     // 6) DropdownButton - VERSIÓN MEJORADA
     if (comp.type === 'DropdownButton') {
