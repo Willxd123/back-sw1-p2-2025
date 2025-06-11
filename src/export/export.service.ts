@@ -58,9 +58,12 @@ export class ExportService {
         pageFolderPath,
         `${pageFolderName}_page.dart`,
       );
+
+      // Validar componentes antes de generar
+      const validatedComponents = this.validateComponents(page.components);
       const dartContent = this.generateFlutterPageDart(
         pageClassName,
-        page.components,
+        validatedComponents,
       );
       await writeFileAsync(fullDartPath, dartContent);
 
@@ -80,6 +83,171 @@ export class ExportService {
     await this.zipDirectory(roomExportPath, zipPath, projectName);
 
     return zipPath;
+  }
+
+  /**
+   * Valida y normaliza los componentes antes de procesarlos
+   */
+  private validateComponents(components: any[]): any[] {
+    return components.map((comp) => this.validateComponent(comp));
+  }
+
+  /**
+   * Valida un componente individual y sus propiedades
+   */
+  private validateComponent(comp: any): any {
+    const validated = { ...comp };
+
+    // Validar dimensiones
+    validated.width = this.validateNumeric(comp.width, 50, 1, 10000);
+    validated.height = this.validateNumeric(comp.height, 50, 1, 10000);
+
+    // Validar posicionamiento
+    if (comp.top !== undefined) {
+      validated.top = this.validateNumeric(comp.top, 0, 0, 10000);
+    }
+    if (comp.left !== undefined) {
+      validated.left = this.validateNumeric(comp.left, 0, 0, 10000);
+    }
+
+    // Validar padding
+    validated.paddingAll = this.validateNumeric(comp.paddingAll, 0, 0, 100);
+    validated.paddingHorizontal = this.validateNumeric(
+      comp.paddingHorizontal,
+      0,
+      0,
+      100,
+    );
+    validated.paddingVertical = this.validateNumeric(
+      comp.paddingVertical,
+      0,
+      0,
+      100,
+    );
+    validated.paddingTop = this.validateNumeric(comp.paddingTop, 0, 0, 100);
+    validated.paddingBottom = this.validateNumeric(
+      comp.paddingBottom,
+      0,
+      0,
+      100,
+    );
+    validated.paddingLeft = this.validateNumeric(comp.paddingLeft, 0, 0, 100);
+    validated.paddingRight = this.validateNumeric(comp.paddingRight, 0, 0, 100);
+
+    // Validar gap para layouts
+    validated.gap = this.validateNumeric(comp.gap, 0, 0, 100);
+
+    // Validar colores
+    if (comp.decoration) {
+      validated.decoration = { ...comp.decoration };
+      if (comp.decoration.color) {
+        validated.decoration.color = this.validateColor(
+          comp.decoration.color,
+          '#ffffff',
+        );
+      }
+      if (comp.decoration.border) {
+        validated.decoration.border = {
+          color: this.validateColor(comp.decoration.border.color, '#000000'),
+          width: this.validateNumeric(comp.decoration.border.width, 0, 0, 20),
+        };
+      }
+      validated.decoration.borderRadius = this.validateNumeric(
+        comp.decoration.borderRadius,
+        0,
+        0,
+        100,
+      );
+    }
+
+    // Validar texto
+    if (comp.text !== undefined) {
+      validated.text = String(comp.text || '');
+    }
+
+    // Validar propiedades de texto
+    validated.fontSize = this.validateNumeric(comp.fontSize, 14, 8, 72);
+    if (comp.textColor) {
+      validated.textColor = this.validateColor(comp.textColor, '#000000');
+    }
+
+    // Validar alignment
+    if (comp.alignment) {
+      validated.alignment = this.validateAlignment(comp.alignment);
+    }
+
+    // Validar childrenLayout
+    if (comp.childrenLayout) {
+      validated.childrenLayout = this.validateChildrenLayout(
+        comp.childrenLayout,
+      );
+    }
+
+    // Validar componentes hijos recursivamente
+    if (Array.isArray(comp.children)) {
+      validated.children = comp.children.map((child) =>
+        this.validateComponent(child),
+      );
+    }
+
+    return validated;
+  }
+
+  /**
+   * Valida valores numéricos
+   */
+  private validateNumeric(
+    value: any,
+    defaultValue: number,
+    min: number,
+    max: number,
+  ): number {
+    const num = Number(value);
+    if (isNaN(num)) return defaultValue;
+    return Math.max(min, Math.min(max, num));
+  }
+
+  /**
+   * Valida colores en formato hexadecimal
+   */
+  private validateColor(color: string, defaultColor: string): string {
+    if (!color || typeof color !== 'string') return defaultColor;
+
+    // Permitir transparent
+    if (color.toLowerCase() === 'transparent') return 'transparent';
+
+    // Validar formato hex
+    const hexPattern = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
+    if (hexPattern.test(color)) return color;
+
+    return defaultColor;
+  }
+
+  /**
+   * Valida alignment
+   */
+  private validateAlignment(alignment: string): string {
+    const validAlignments = [
+      'topLeft',
+      'topCenter',
+      'topRight',
+      'centerLeft',
+      'center',
+      'centerRight',
+      'bottomLeft',
+      'bottomCenter',
+      'bottomRight',
+    ];
+
+    return validAlignments.includes(alignment) ? alignment : 'center';
+  }
+
+  /**
+   * Valida childrenLayout
+   */
+  private validateChildrenLayout(layout: string): string {
+    const validLayouts = ['stack', 'column', 'row'];
+    return validLayouts.includes(layout) ? layout : 'stack';
   }
 
   private toPascalCase(str: string): string {
@@ -111,14 +279,7 @@ export class ExportService {
     // Detectar recursivamente si existe algún DropdownButton o Checkbox
     const hasStateful = this.containsStatefulWidget(components);
 
-    // Generar cuerpo (sin AppBar) como lista de strings
-    const bodyComponents = components
-      .filter((c) => c.type !== 'AppBar')
-      .map((comp) => this.generateFlutterWidget(comp))
-      .filter((widget) => widget.trim() !== '') // Filtrar widgets vacíos
-      .join(',\n\n');
-
-    // Construir appBarDart (vacío o con valores del JSON)
+    // Construir appBarDart
     let appBarDart = `appBar: AppBar(
         backgroundColor: const Color(0xFF2196f3),
         title: const Text(''),
@@ -149,6 +310,11 @@ export class ExportService {
       ),`;
     }
 
+    // Determinar el layout del body
+    const bodyLayout = this.determineBodyLayout(
+      components.filter((c) => c.type !== 'AppBar'),
+    );
+
     // Si no hay componentes con estado, generamos StatelessWidget
     if (!hasStateful) {
       return `import 'package:flutter/material.dart';
@@ -160,14 +326,7 @@ class ${className} extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       ${appBarDart}
-      body: Stack(
-        children: [
-${bodyComponents
-  .split('\n')
-  .map((line) => '          ' + line)
-  .join('\n')}
-        ],
-      ),
+      body: ${bodyLayout},
     );
   }
 }`;
@@ -203,17 +362,55 @@ class _${className}State extends State<${className}> {
   Widget build(BuildContext context) {
     return Scaffold(
       ${appBarDart}
-      body: Stack(
-        children: [
-${bodyComponents
-  .split('\n')
-  .map((line) => '          ' + line)
-  .join('\n')}
-        ],
-      ),
+      body: ${bodyLayout},
     );
   }
 }`;
+  }
+
+  /**
+   * Determina el layout del body basado en los componentes
+   */
+  private determineBodyLayout(components: any[]): string {
+    if (components.length === 0) {
+      return 'Container()';
+    }
+
+    // Verificar si hay componentes con posicionamiento absoluto
+    const hasAbsolutePositioning = components.some(
+      (comp) =>
+        comp.top !== undefined && comp.left !== undefined && !comp.alignment,
+    );
+
+    // Si hay posicionamiento absoluto, usar Stack
+    if (hasAbsolutePositioning) {
+      const stackChildren = components
+        .map((comp) => this.generateFlutterWidget(comp))
+        .filter((widget) => widget.trim() !== '')
+        .join(',\n          ');
+
+      return `Stack(
+        children: [
+          ${stackChildren}
+        ],
+      )`;
+    }
+
+    // Si no hay posicionamiento absoluto, usar Column con espaciado
+    const columnChildren = components
+      .map((comp) => this.generateFlutterWidget(comp))
+      .filter((widget) => widget.trim() !== '')
+      .join(',\n          ');
+
+    return `Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ${columnChildren}
+        ],
+      ),
+    )`;
   }
 
   /**
@@ -247,10 +444,10 @@ ${bodyComponents
   }
 
   /**
-   * Genera cada widget Flutter - VERSIÓN CORREGIDA PARA CHECKBOX
+   * Genera cada widget Flutter con soporte mejorado para padding y validaciones
    */
   private generateFlutterWidget(comp: any): string {
-    // 1) Propiedades comunes de tamaño y decoración
+    // Propiedades comunes validadas
     const width = comp.width ?? 50;
     const height = comp.height ?? 50;
     const color = (comp.decoration?.color ?? '#ffffff').replace('#', '');
@@ -261,13 +458,18 @@ ${bodyComponents
     const borderWidth = comp.decoration?.border?.width ?? 0;
     const borderRadius = comp.decoration?.borderRadius ?? 0;
 
-    // Solo crear decoración si no es transparente
+    // Verificar transparencia
     const isTransparent =
       comp.decoration?.color === 'transparent' ||
-      comp.decoration?.color === '#transparent';
+      comp.decoration?.color === '#transparent' ||
+      !comp.decoration?.color;
     const hasBorder =
       borderWidth > 0 && comp.decoration?.border?.color !== 'transparent';
 
+    // Generar padding EdgeInsets
+    const paddingEdgeInsets = this.generatePaddingEdgeInsets(comp);
+
+    // Crear decoración
     let decoration = '';
     if (!isTransparent || hasBorder) {
       decoration = `BoxDecoration(
@@ -284,42 +486,151 @@ ${bodyComponents
     )`;
     }
 
-    // 2) AppBar → no se maneja aquí
+    // AppBar no se maneja aquí
     if (comp.type === 'AppBar') {
       return '';
     }
 
-    // 3) Text
+    // Text con posicionamiento especial
     if (comp.type === 'Text') {
-      const rawText = (comp.text ?? '').replace(/'/g, "\\'");
-      const fontSize = comp.fontSize ?? 14;
-      const textColor =
-        comp.textColor && comp.textColor !== 'transparent'
-          ? comp.textColor.replace('#', '')
-          : '000000';
+      return this.generateTextWidget(comp, paddingEdgeInsets);
+    }
 
-      // Sanitizar fontFamily
-      let fontFamilyValue: string | null = null;
-      if (comp.fontFamily && comp.fontFamily !== 'inherit') {
-        fontFamilyValue = comp.fontFamily.trim().replace(/^['"]|['"]$/g, '');
+    // TextButton
+    if (comp.type === 'TextButton') {
+      return this.generateTextButtonWidget(
+        comp,
+        width,
+        height,
+        color,
+        borderColor,
+        borderWidth,
+        borderRadius,
+        isTransparent,
+        paddingEdgeInsets,
+      );
+    }
+
+    // TextField
+    if (comp.type === 'TextField') {
+      return this.generateTextFieldWidget(
+        comp,
+        width,
+        height,
+        color,
+        borderColor,
+        borderWidth,
+        borderRadius,
+        isTransparent,
+        paddingEdgeInsets,
+      );
+    }
+
+    // Checkbox
+    if (comp.type === 'Checkbox') {
+      return this.generateCheckboxWidget(
+        comp,
+        width,
+        height,
+        paddingEdgeInsets,
+      );
+    }
+
+    // DropdownButton
+    if (comp.type === 'DropdownButton') {
+      return this.generateDropdownWidget(
+        comp,
+        width,
+        height,
+        decoration,
+        paddingEdgeInsets,
+      );
+    }
+
+    // Container con soporte para layouts mejorado
+    if (comp.type === 'Container') {
+      return this.generateContainerWidget(
+        comp,
+        width,
+        height,
+        decoration,
+        paddingEdgeInsets,
+      );
+    }
+
+    // Fallback: un Container vacío
+    const fallback = `Container(
+      width: ${width},
+      height: ${height},
+      ${decoration ? `decoration: ${decoration},` : ''}
+      ${paddingEdgeInsets ? `padding: ${paddingEdgeInsets},` : ''}
+    )`;
+
+    return this.wrapWithPositioning(fallback, comp);
+  }
+
+  /**
+   * Genera EdgeInsets para padding basado en las propiedades del componente
+   */
+  private generatePaddingEdgeInsets(comp: any): string {
+    // Prioridad: paddingAll -> paddingHorizontal/Vertical -> valores individuales
+    if (comp.paddingAll !== undefined && comp.paddingAll > 0) {
+      return `EdgeInsets.all(${comp.paddingAll})`;
+    }
+
+    const hasHorizontal =
+      comp.paddingHorizontal !== undefined && comp.paddingHorizontal > 0;
+    const hasVertical =
+      comp.paddingVertical !== undefined && comp.paddingVertical > 0;
+
+    if (hasHorizontal && hasVertical) {
+      return `EdgeInsets.symmetric(horizontal: ${comp.paddingHorizontal}, vertical: ${comp.paddingVertical})`;
+    } else if (hasHorizontal) {
+      return `EdgeInsets.symmetric(horizontal: ${comp.paddingHorizontal})`;
+    } else if (hasVertical) {
+      return `EdgeInsets.symmetric(vertical: ${comp.paddingVertical})`;
+    }
+
+    // Valores individuales
+    const top = comp.paddingTop ?? 0;
+    const right = comp.paddingRight ?? 0;
+    const bottom = comp.paddingBottom ?? 0;
+    const left = comp.paddingLeft ?? 0;
+
+    if (top > 0 || right > 0 || bottom > 0 || left > 0) {
+      return `EdgeInsets.only(top: ${top}, right: ${right}, bottom: ${bottom}, left: ${left})`;
+    }
+
+    return '';
+  }
+
+  private generateTextWidget(comp: any, paddingEdgeInsets: string): string {
+    const rawText = (comp.text ?? '').replace(/'/g, "\\'");
+    const fontSize = comp.fontSize ?? 14;
+    const textColor =
+      comp.textColor && comp.textColor !== 'transparent'
+        ? comp.textColor.replace('#', '')
+        : '000000';
+
+    let fontFamilyValue: string | null = null;
+    if (comp.fontFamily && comp.fontFamily !== 'inherit') {
+      fontFamilyValue = comp.fontFamily.trim().replace(/^['"]|['"]$/g, '');
+    }
+
+    const textAlignDart = (() => {
+      switch (comp.textAlign) {
+        case 'center':
+          return 'TextAlign.center';
+        case 'right':
+          return 'TextAlign.right';
+        case 'justify':
+          return 'TextAlign.justify';
+        default:
+          return 'TextAlign.left';
       }
+    })();
 
-      // Alineación interna del Text
-      const textAlignDart = (() => {
-        switch (comp.textAlign) {
-          case 'center':
-            return 'TextAlign.center';
-          case 'right':
-            return 'TextAlign.right';
-          case 'justify':
-            return 'TextAlign.justify';
-          default:
-            return 'TextAlign.left';
-        }
-      })();
-
-      // Construir widget Text(...)
-      const textWidget = `Text(
+    let textWidget = `Text(
       '${rawText}',
       textAlign: ${textAlignDart},
       style: TextStyle(
@@ -328,405 +639,416 @@ ${bodyComponents
       ),
     )`;
 
-      // Envolver en Container centrado
-      const containerWrapper = `Container(
-      width: ${comp.width},
-      height: ${comp.height},
-      alignment: Alignment.center,
-      ${decoration ? `decoration: ${decoration},` : ''}
-      child: ${textWidget},
-    )`;
-
-      // Posicionar con Align o Positioned
-      if (comp.alignment) {
-        return `Align(
-        alignment: Alignment.${comp.alignment},
-        child: ${containerWrapper},
+    // Aplicar padding si existe
+    if (paddingEdgeInsets) {
+      textWidget = `Padding(
+        padding: ${paddingEdgeInsets},
+        child: ${textWidget},
       )`;
-      } else {
-        return `Positioned(
-        top: ${comp.top ?? 0},
-        left: ${comp.left ?? 0},
-        child: ${containerWrapper},
-      )`;
-      }
     }
 
-    // 4) TextButton
-    // Reemplaza la sección de TextButton en el método generateFlutterWidget
+    // Aplicar posicionamiento
+    if (
+      comp.parentId &&
+      ((comp.top !== undefined && comp.left !== undefined) || !comp.alignment)
+    ) {
+      const topValue = comp.top ?? 0;
+      const leftValue = comp.left ?? 0;
 
-    // Reemplaza la sección de TextButton en el método generateFlutterWidget
-
-// 4) TextButton
-if (comp.type === 'TextButton') {
-  // 1. Preparar texto y estilo
-  const label = (comp.text ?? '').replace(/'/g, "\\'");
-  const fontSize = comp.fontSize ?? 16;
-  const textColor = (comp.textColor ?? '#000000').replace('#', '');
-  const fontFamilyValue =
-    comp.fontFamily && comp.fontFamily !== 'inherit'
-      ? comp.fontFamily.trim().replace(/^['"]|['"]$/g, '')
-      : null;
-
-  // 2. Alineación de texto en Dart
-  const textAlignDart = (() => {
-    switch (comp.textAlign) {
-      case 'center':
-        return 'TextAlign.center';
-      case 'right':
-        return 'TextAlign.right';
-      case 'justify':
-        return 'TextAlign.justify';
-      default:
-        return 'TextAlign.left';
+      return `Positioned(
+        top: ${topValue},
+        left: ${leftValue},
+        child: ${textWidget},
+      )`;
     }
-  })();
 
-  // 3. Ruta de navegación
-  const route = comp.navigateTo ?? '/';
-
-  // 4. Construir el widget TextButton envuelto en SizedBox para forzar dimensiones exactas
-  const buttonWidget = `SizedBox(
-    width: ${width}.0,
-    height: ${height}.0,
-    child: TextButton(
-      style: TextButton.styleFrom(
-        padding: EdgeInsets.all(4.0), // Padding mínimo para que el texto pueda acercarse a los bordes
-        backgroundColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(${borderRadius}.0),
-          side: BorderSide(color: Color(0xFF${borderColor}), width: ${borderWidth}.0),
-        ),
-      ),
-      onPressed: () => Navigator.pushNamed(context, '${route}'),
-      child: Container(
-        width: double.infinity,
-        height: double.infinity,
-        child: Center(
-          child: Text(
-            '${label}',
-            textAlign: ${textAlignDart},
-            softWrap: true, // Permitir que el texto se ajuste en múltiples líneas
-            overflow: TextOverflow.visible, // Permitir que el texto sea visible completamente
-            maxLines: null, // Sin límite de líneas
-            style: TextStyle(
-              fontSize: ${fontSize}.0,
-              color: Color(0xFF${textColor}),
-              height: 1.0, // Espaciado entre líneas más compacto
-              ${fontFamilyValue ? `fontFamily: '${fontFamilyValue}',` : ''}
-            ),
-          ),
-        ),
-      ),
-    ),
-  )`;
-
-  // 5. Posicionar o alinear según `comp.alignment`
-  if (comp.alignment) {
-    return `Align(
-      alignment: Alignment.${comp.alignment},
-      child: ${buttonWidget},
-    )`;
-  } else {
-    return `Positioned(
-      top: ${comp.top ?? 0}.0,
-      left: ${comp.left ?? 0}.0,
-      child: ${buttonWidget},
-    )`;
+    return this.wrapWithPositioning(textWidget, comp);
   }
-}
-    // … continúa con Checkbox, DropdownButton, etc. …
-// 5) TextField
-if (comp.type === 'TextField') {
-  // Propiedades específicas del TextField
-  const hintText = (comp.hintText ?? '').replace(/'/g, "\\'");
-  const labelText = (comp.labelText ?? '').replace(/'/g, "\\'");
-  const fontSize = comp.fontSize ?? 16;
-  const inputTextColor = (comp.inputTextColor ?? '#212121').replace('#', '');
-  const hintColor = (comp.hintColor ?? '#9e9e9e').replace('#', '');
-  const labelColor = (comp.labelColor ?? '#757575').replace('#', '');
-  const focusedBorderColor = (comp.focusedBorderColor ?? '#2196f3').replace('#', '');
-  const borderType = comp.borderType ?? 'outline';
-  const enabled = comp.enabled ?? true;
-  const inputType = comp.inputType ?? 'text';
 
-  // Determinar el tipo de teclado
-  const keyboardType = (() => {
-    switch (inputType) {
-      case 'number':
-        return 'TextInputType.number';
-      case 'email':
-        return 'TextInputType.emailAddress';
-      case 'phone':
-        return 'TextInputType.phone';
-      case 'multiline':
-        return 'TextInputType.multiline';
-      default:
-        return 'TextInputType.text';
-    }
-  })();
+  private generateContainerWidget(
+    comp: any,
+    width: number,
+    height: number,
+    decoration: string,
+    paddingEdgeInsets: string,
+  ): string {
+    const childrenLayout = comp.childrenLayout ?? 'stack';
+    const gap = comp.gap ?? 0;
 
-  // Crear el InputDecoration basado en borderType
-  const inputDecoration = borderType === 'outline' 
-    ? `InputDecoration(
-        hintText: '${hintText}',
-        ${labelText ? `labelText: '${labelText}',` : ''}
-        hintStyle: TextStyle(color: Color(0xFF${hintColor})),
-        ${labelText ? `labelStyle: TextStyle(color: Color(0xFF${labelColor})),` : ''}
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(${borderRadius}.0),
-          borderSide: BorderSide(
-            color: Color(0xFF${borderColor}),
-            width: ${borderWidth}.0,
-          ),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(${borderRadius}.0),
-          borderSide: BorderSide(
-            color: Color(0xFF${focusedBorderColor}),
-            width: 2.0,
-          ),
-        ),
-        filled: true,
-        fillColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
-      )`
-    : `InputDecoration(
-        hintText: '${hintText}',
-        ${labelText ? `labelText: '${labelText}',` : ''}
-        hintStyle: TextStyle(color: Color(0xFF${hintColor})),
-        ${labelText ? `labelStyle: TextStyle(color: Color(0xFF${labelColor})),` : ''}
-        border: UnderlineInputBorder(
-          borderSide: BorderSide(
-            color: Color(0xFF${borderColor}),
-            width: ${borderWidth}.0,
-          ),
-        ),
-        focusedBorder: UnderlineInputBorder(
-          borderSide: BorderSide(
-            color: Color(0xFF${focusedBorderColor}),
-            width: 2.0,
-          ),
-        ),
-        filled: true,
-        fillColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
-      )`;
+    let childrenWidget = '';
+    if (Array.isArray(comp.children) && comp.children.length > 0) {
+      const textChildren = comp.children.filter(
+        (child: any) => child.type === 'Text',
+      );
+      const otherChildren = comp.children.filter(
+        (child: any) => child.type !== 'Text',
+      );
 
-  // Construir el widget TextField
-  const textFieldWidget = `SizedBox(
-    width: ${width}.0,
-    height: ${height}.0,
-    child: TextField(
-      enabled: ${enabled},
-      keyboardType: ${keyboardType},
-      ${inputType === 'multiline' ? 'maxLines: null,' : ''}
-      style: TextStyle(
-        fontSize: ${fontSize}.0,
-        color: Color(0xFF${inputTextColor}),
-      ),
-      decoration: ${inputDecoration},
-      onChanged: (String value) {
-        // Aquí puedes agregar lógica para manejar el cambio de valor
-      },
-    ),
-  )`;
+      const mappedOtherChildren = otherChildren
+        .map((child: any) => this.generateFlutterWidget(child))
+        .filter((widget) => widget.trim() !== '');
 
-  // Posicionar o alinear según `comp.alignment`
-  if (comp.alignment) {
-    return `Align(
-      alignment: Alignment.${comp.alignment},
-      child: ${textFieldWidget},
-    )`;
-  } else {
-    return `Positioned(
-      top: ${comp.top ?? 0}.0,
-      left: ${comp.left ?? 0}.0,
-      child: ${textFieldWidget},
-    )`;
-  }
-}
-    // 5) Checkbox - USANDO WIDGET NATIVO CON TRANSFORM.SCALE
-    if (comp.type === 'Checkbox') {
-      // Propiedades específicas del checkbox
-      const scale = comp.scale || 1;
-      const checkColor = (comp.checkColor ?? '#FF0000').replace('#', '');
-      const activeColor = (comp.activeColor ?? '#FFFF00').replace('#', '');
-      const borderColor = (
-        comp.borderColor ??
-        comp.checkColor ??
-        '#FF0000'
-      ).replace('#', '');
-      const borderWidth = comp.borderWidth ?? 1;
-      const borderRadius = comp.borderRadius ?? 4;
+      const mappedTextChildren = textChildren
+        .map((child: any) => this.generateFlutterWidget(child))
+        .filter((widget) => widget.trim() !== '');
 
-      // Determinar la forma del checkbox
-      const shapeWidget =
-        borderRadius === 50
-          ? `CircleBorder(
-        side: BorderSide(
-          color: Color(0xFF${borderColor}),
-          width: ${borderWidth}.0,
-        ),
-      )`
-          : `RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(${borderRadius}.0),
-        side: BorderSide(
-          color: Color(0xFF${borderColor}),
-          width: ${borderWidth}.0,
-        ),
-      )`;
-
-      // Crear el widget Checkbox nativo escalado
-      const checkboxWidget = `Transform.scale(
-    scale: ${scale},
-    child: Checkbox(
-      value: _checkboxValues['${comp.id}'] ?? false,
-      activeColor: Color(0xFF${activeColor}),
-      checkColor: Color(0xFF${checkColor}),
-      side: BorderSide(
-        color: Color(0xFF${borderColor}),
-        width: ${borderWidth}.0,
-      ),
-      shape: ${shapeWidget},
-      onChanged: (bool? value) {
-        setState(() {
-          _checkboxValues['${comp.id}'] = value ?? false;
-        });
-      },
-    ),
-  )`;
-
-      // Contenedor principal
-      const container = `Container(
-    width: ${width}.0,
-    height: ${height}.0,
-    color: Colors.transparent,
-    child: Center(
-      child: ${checkboxWidget},
-    ),
-  )`;
-
-      // Posicionar o alinear
-      if (comp.alignment) {
-        return `Align(
-      alignment: Alignment.${comp.alignment},
-      child: ${container},
-    )`;
-      } else {
-        return `Positioned(
-      top: ${comp.top ?? 0}.0,
-      left: ${comp.left ?? 0}.0,
-      child: ${container},
-    )`;
-      }
-    }
-
-    // 6) DropdownButton - VERSIÓN MEJORADA
-    if (comp.type === 'DropdownButton') {
-      const optionsArray = Array.isArray(comp.options) ? comp.options : [];
-      const optionsList = optionsArray
-        .map((opt: string) => `'${opt.replace(/'/g, "\\'")}'`)
-        .join(', ');
-
-      const dropdownWidget = `DropdownButton<String>(
-      value: _dropdownValues['${comp.id}'],
-      isExpanded: true,
-      items: <String>[${optionsList}]
-          .map<DropdownMenuItem<String>>((String value) {
-        return DropdownMenuItem<String>(
-          value: value,
-          child: Text(
-            value,
-            overflow: TextOverflow.ellipsis,
-          ),
-        );
-      }).toList(),
-      onChanged: (String? newValue) {
-        setState(() {
-          _dropdownValues['${comp.id}'] = newValue ?? '';
-        });
-      },
-    )`;
-
-      const containerWithDropdown = `Container(
-      width: ${width},
-      height: ${height},
-      ${decoration ? `decoration: ${decoration},` : ''}
-      padding: const EdgeInsets.symmetric(horizontal: 8.0),
-      child: Center(child: ${dropdownWidget}),
-    )`;
-
-      if (comp.alignment) {
-        return `Align(
-        alignment: Alignment.${comp.alignment},
-        child: ${containerWithDropdown},
-      )`;
-      } else {
-        return `Positioned(
-        top: ${comp.top ?? 0},
-        left: ${comp.left ?? 0},
-        child: ${containerWithDropdown},
-      )`;
-      }
-    }
-
-    // 7) Container genérico (puede tener children)
-    if (comp.type === 'Container') {
-      let childrenStack = '';
-      if (Array.isArray(comp.children) && comp.children.length > 0) {
-        const mappedChildren = comp.children
-          .map((child: any) => this.generateFlutterWidget(child))
-          .filter((widget) => widget.trim() !== '')
-          .join(',\n        ');
-
-        if (mappedChildren) {
-          childrenStack = `child: Stack(
+      if (mappedOtherChildren.length > 0) {
+        switch (childrenLayout) {
+          case 'column':
+            const columnChildren = mappedOtherChildren.join(',\n          ');
+            childrenWidget = `child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        spacing: ${gap},
         children: [
-          ${mappedChildren}
+          ${columnChildren}
         ],
-      ),`;
+      )`;
+            break;
+          case 'row':
+            const rowChildren = mappedOtherChildren.join(',\n          ');
+            childrenWidget = `child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        spacing: ${gap},
+        children: [
+          ${rowChildren}
+        ],
+      )`;
+            break;
+          default: // stack
+            const stackChildren = [
+              ...mappedOtherChildren,
+              ...mappedTextChildren,
+            ].join(',\n          ');
+            childrenWidget = `child: Stack(
+        children: [
+          ${stackChildren}
+        ],
+      )`;
+            break;
         }
       }
 
-      const containerWithChildren = `Container(
-      width: ${width},
-      height: ${height},
-      ${decoration ? `decoration: ${decoration},` : ''}
-      ${childrenStack}
-    )`;
+      if (
+        mappedTextChildren.length > 0 &&
+        (childrenLayout === 'row' || childrenLayout === 'column')
+      ) {
+        const layoutWidget = childrenWidget.replace('child: ', '');
+        const allTextChildren = mappedTextChildren.join(',\n          ');
 
-      if (comp.alignment) {
-        return `Align(
-        alignment: Alignment.${comp.alignment},
-        child: ${containerWithChildren},
-      )`;
-      } else {
-        return `Positioned(
-        top: ${comp.top ?? 0},
-        left: ${comp.left ?? 0},
-        child: ${containerWithChildren},
+        childrenWidget = `child: Stack(
+        children: [
+          ${layoutWidget},
+          ${allTextChildren}
+        ],
       )`;
       }
     }
 
-    // 8) Fallback: un Container vacío
-    const fallback = `Container(
-    width: ${width},
-    height: ${height},
-    ${decoration ? `decoration: ${decoration},` : ''}
-  )`;
+    const containerWithChildren = `Container(
+      width: ${width},
+      height: ${height},
+      ${decoration ? `decoration: ${decoration},` : ''}
+      ${paddingEdgeInsets ? `padding: ${paddingEdgeInsets},` : ''}
+      ${childrenWidget ? childrenWidget + ',' : ''}
+    )`;
 
+    return this.wrapWithPositioning(containerWithChildren, comp);
+  }
+
+  // Métodos auxiliares para otros widgets...
+  private generateTextButtonWidget(
+    comp: any,
+    width: number,
+    height: number,
+    color: string,
+    borderColor: string,
+    borderWidth: number,
+    borderRadius: number,
+    isTransparent: boolean,
+    paddingEdgeInsets: string,
+  ): string {
+    const label = (comp.text ?? '').replace(/'/g, "\\'");
+    const fontSize = comp.fontSize ?? 16;
+    const textColor = (comp.textColor ?? '#000000').replace('#', '');
+    const route = comp.navigateTo ?? '/';
+
+    let buttonWidget = `SizedBox(
+      width: ${width},
+      height: ${height},
+      child: TextButton(
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.all(4),
+          backgroundColor: ${isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`},
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(${borderRadius}),
+            side: BorderSide(color: Color(0xFF${borderColor}), width: ${borderWidth}),
+          ),
+        ),
+        onPressed: () => Navigator.pushNamed(context, '${route}'),
+        child: Text(
+          '${label}',
+          style: TextStyle(
+            fontSize: ${fontSize},
+            color: Color(0xFF${textColor}),
+          ),
+        ),
+      ),
+    )`;
+
+    if (paddingEdgeInsets) {
+      buttonWidget = `Padding(
+        padding: ${paddingEdgeInsets},
+        child: ${buttonWidget},
+      )`;
+    }
+
+    return this.wrapWithPositioning(buttonWidget, comp);
+  }
+
+  private generateTextFieldWidget(
+    comp: any,
+    width: number,
+    height: number,
+    color: string,
+    borderColor: string,
+    borderWidth: number,
+    borderRadius: number,
+    isTransparent: boolean,
+    paddingEdgeInsets: string,
+  ): string {
+    const hintText = (comp.hintText ?? '').replace(/'/g, "\\'");
+    const fontSize = comp.fontSize || 16;
+    const inputTextColor = (comp.inputTextColor || '#212121').replace('#', '');
+    const hintColor = (comp.hintColor || '#9e9e9e').replace('#', '');
+    const focusedBorderColor = (comp.focusedBorderColor || '#2196f3').replace('#', '');
+    const labelColor = (comp.labelColor || '#757575').replace('#', '');
+    const backgroundColor = isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`;
+    
+    // Determinar el tipo de borde
+    const borderType = comp.borderType || 'outline';
+    
+    let inputBorder = '';
+    let focusedBorder = '';
+    
+    if (borderType === 'outline') {
+      inputBorder = `OutlineInputBorder(
+        borderRadius: BorderRadius.circular(${borderRadius}),
+        borderSide: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth},
+        ),
+      )`;
+      focusedBorder = `OutlineInputBorder(
+        borderRadius: BorderRadius.circular(${borderRadius}),
+        borderSide: BorderSide(
+          color: Color(0xFF${focusedBorderColor}),
+          width: ${borderWidth + 1},
+        ),
+      )`;
+    } else if (borderType === 'underline') {
+      inputBorder = `UnderlineInputBorder(
+        borderSide: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth},
+        ),
+      )`;
+      focusedBorder = `UnderlineInputBorder(
+        borderSide: BorderSide(
+          color: Color(0xFF${focusedBorderColor}),
+          width: ${borderWidth + 1},
+        ),
+      )`;
+    } else {
+      inputBorder = 'InputBorder.none';
+      focusedBorder = 'InputBorder.none';
+    }
+  
+    let textFieldWidget = `SizedBox(
+      width: ${width},
+      height: ${height},
+      child: TextField(
+        style: TextStyle(
+          fontSize: ${fontSize},
+          color: Color(0xFF${inputTextColor}),
+        ),
+        decoration: InputDecoration(
+          hintText: '${hintText}',
+          hintStyle: TextStyle(
+            color: Color(0xFF${hintColor}),
+            fontSize: ${fontSize},
+          ),
+          fillColor: ${backgroundColor},
+          filled: true,
+          border: ${inputBorder},
+          enabledBorder: ${inputBorder},
+          focusedBorder: ${focusedBorder},
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: ${comp.labelText ? 20 : 12},
+          ),
+          ${comp.labelText ? `labelText: '${comp.labelText.replace(/'/g, "\\'")}',` : ''}
+          ${comp.labelText ? `labelStyle: TextStyle(color: Color(0xFF${labelColor})),` : ''}
+        ),
+        ${comp.inputType === 'password' ? 'obscureText: true,' : ''}
+        ${comp.inputType === 'number' ? 'keyboardType: TextInputType.number,' : ''}
+        ${comp.inputType === 'email' ? 'keyboardType: TextInputType.emailAddress,' : ''}
+        ${comp.maxLength ? `maxLength: ${comp.maxLength},` : ''}
+        enabled: ${comp.enabled !== false},
+      ),
+    )`;
+  
+    if (paddingEdgeInsets) {
+      textFieldWidget = `Padding(
+        padding: ${paddingEdgeInsets},
+        child: ${textFieldWidget},
+      )`;
+    }
+  
+    return this.wrapWithPositioning(textFieldWidget, comp);
+  }
+
+  private generateCheckboxWidget(
+    comp: any,
+    width: number,
+    height: number,
+    paddingEdgeInsets: string,
+  ): string {
+    // Propiedades del checkbox personalizado
+    const scale = comp.scale || 1;
+    const checkColor = (comp.checkColor || '#FF0000').replace('#', '');
+    const activeColor = (comp.activeColor || '#FFFF00').replace('#', '');
+    const borderColor = (comp.borderColor || '#FF0000').replace('#', '');
+    const borderWidth = comp.borderWidth || 2;
+    const borderRadius = comp.borderRadius || 0;
+    const isChecked = comp.checked || false;
+  
+    // Determinar si es circular basado en borderRadius
+    // Si borderRadius >= 50, se considera circular
+    const isCircular = borderRadius >= 50;
+    const finalBorderRadius = isCircular ? 50 : borderRadius;
+  
+    // Crear el shape según si es circular o rectangular
+    let shapeWidget = '';
+    if (isCircular) {
+      shapeWidget = `shape: CircleBorder(
+        side: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth},
+        ),
+      ),`;
+    } else {
+      shapeWidget = `shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(${finalBorderRadius}),
+        side: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth},
+        ),
+      ),`;
+    }
+  
+    let checkboxWidget = `Transform.scale(
+      scale: ${scale},
+      child: Checkbox(
+        value: _checkboxValues['${comp.id}'] ?? ${isChecked},
+        activeColor: Color(0xFF${activeColor}),
+        checkColor: Color(0xFF${checkColor}),
+        side: BorderSide(
+          color: Color(0xFF${borderColor}),
+          width: ${borderWidth},
+        ),
+        ${shapeWidget}
+        onChanged: (bool? value) {
+          setState(() {
+            _checkboxValues['${comp.id}'] = value ?? false;
+          });
+        },
+      ),
+    )`;
+  
+    // Envolver en Container para controlar el tamaño total si es necesario
+    if (width !== 50 || height !== 50) { // Solo si no es el tamaño por defecto
+      checkboxWidget = `Container(
+        width: ${width},
+        height: ${height},
+        child: ${checkboxWidget},
+      )`;
+    }
+  
+    if (paddingEdgeInsets) {
+      checkboxWidget = `Padding(
+        padding: ${paddingEdgeInsets},
+        child: ${checkboxWidget},
+      )`;
+    }
+  
+    return this.wrapWithPositioning(checkboxWidget, comp);
+  }
+  private generateDropdownWidget(
+    comp: any,
+    width: number,
+    height: number,
+    decoration: string,
+    paddingEdgeInsets: string,
+  ): string {
+    const optionsArray = Array.isArray(comp.options) ? comp.options : ['Opción 1'];
+    const optionsList = optionsArray
+      .map((opt: string) => `'${opt.replace(/'/g, "\\'")}'`)
+      .join(', ');
+  
+    let dropdownWidget = `Container(
+      width: ${width},
+      height: ${height},
+      ${decoration ? `decoration: ${decoration},` : ''}
+      ${paddingEdgeInsets ? `padding: ${paddingEdgeInsets},` : ''}
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _dropdownValues['${comp.id}'],
+          isExpanded: true,
+          items: <String>[${optionsList}].map((String value) {
+            return DropdownMenuItem<String>(
+              value: value,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  value,
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+            );
+          }).toList(),
+          onChanged: (String? newValue) {
+            setState(() {
+              _dropdownValues['${comp.id}'] = newValue ?? '';
+            });
+          },
+        ),
+      ),
+    )`;
+  
+    return this.wrapWithPositioning(dropdownWidget, comp);
+  }
+
+  /**
+   * Helper para envolver widgets con posicionamiento
+   */
+  private wrapWithPositioning(widget: string, comp: any): string {
     if (comp.alignment) {
       return `Align(
       alignment: Alignment.${comp.alignment},
-      child: ${fallback},
+      child: ${widget},
     )`;
-    } else {
+    } else if (comp.top !== undefined && comp.left !== undefined) {
       return `Positioned(
       top: ${comp.top ?? 0},
       left: ${comp.left ?? 0},
-      child: ${fallback},
+      child: ${widget},
+    )`;
+    } else {
+      return `Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ${widget},
     )`;
     }
   }
