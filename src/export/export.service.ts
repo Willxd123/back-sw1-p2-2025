@@ -566,8 +566,97 @@ class _${className}State extends State<${className}> {
       ${paddingEdgeInsets ? `padding: ${paddingEdgeInsets},` : ''}
     )`;
 
+    if (comp.type === 'table') {
+      const {
+        top = 0,
+        left = 0,
+        tableBorder,
+        columnWidths,
+        defaultVerticalAlignment = 'middle',
+        headerRow,
+        headerBackgroundColor,
+        alternateRowColor,
+        cellPadding = 8,
+        children = [],
+      } = comp;
+
+      const verticalAlignment =
+        {
+          top: 'TableCellVerticalAlignment.top',
+          middle: 'TableCellVerticalAlignment.middle',
+          bottom: 'TableCellVerticalAlignment.bottom',
+        }[defaultVerticalAlignment] || 'TableCellVerticalAlignment.middle';
+
+      const columnWidthsFlutter = (columnWidths || [])
+        .map((w: number, i: number) => `${i}: FlexColumnWidth(${w})`)
+        .join(', ');
+
+      const tableRows = children
+        .map((row: any, rowIndex: number) => {
+          const isHeader = headerRow && rowIndex === 0;
+          const rowColor = isHeader
+            ? `Color(0xFF${(headerBackgroundColor || '#f0f0f0').replace('#', '')})`
+            : alternateRowColor && rowIndex % 2 === 1
+              ? `Color(0xFF${alternateRowColor.replace('#', '')})`
+              : 'null';
+
+          const cells = row.children
+            .map((cell: any) => {
+              const textColor = cell.textColor
+                ? `Color(0xFF${cell.textColor.replace('#', '')})`
+                : 'Colors.black';
+              const fontSize = cell.fontSize || 12;
+              const fontWeight = isHeader
+                ? 'FontWeight.bold'
+                : 'FontWeight.normal';
+              const textAlign = cell.textAlign || 'center';
+              const cellText = (cell.content || '').replace(/"/g, '\"');
+
+              return `
+            Padding(
+              padding: EdgeInsets.all(${cellPadding.toFixed(1)}),
+              child: Text(
+                "${cellText}",
+                textAlign: TextAlign.${textAlign},
+                style: TextStyle(
+                  color: ${textColor},
+                  fontSize: ${fontSize},
+                  fontWeight: ${fontWeight},
+                ),
+              ),
+            )`;
+            })
+            .join(',\n');
+
+          return `
+          TableRow(
+            decoration: BoxDecoration(color: ${rowColor}),
+            children: [${cells}]
+          )`;
+        })
+        .join(',\n');
+
+      return `
+Positioned(
+  top: ${top},
+  left: ${left},
+  right: 30,
+  child: Table(
+    border: TableBorder.all(
+      color: Color(0xFF${(tableBorder?.color || '#000000').replace('#', '')}),
+      width: ${(tableBorder?.width || 1).toFixed(1)},
+    ),
+    columnWidths: { ${columnWidthsFlutter} },
+    defaultVerticalAlignment: ${verticalAlignment},
+    children: [
+      ${tableRows}
+    ],
+  ),
+)`;
+    }
     return this.wrapWithPositioning(fallback, comp);
   }
+  //tabla
 
   /**
    * Genera EdgeInsets para padding basado en las propiedades del componente
@@ -822,16 +911,21 @@ class _${className}State extends State<${className}> {
     const fontSize = comp.fontSize || 16;
     const inputTextColor = (comp.inputTextColor || '#212121').replace('#', '');
     const hintColor = (comp.hintColor || '#9e9e9e').replace('#', '');
-    const focusedBorderColor = (comp.focusedBorderColor || '#2196f3').replace('#', '');
+    const focusedBorderColor = (comp.focusedBorderColor || '#2196f3').replace(
+      '#',
+      '',
+    );
     const labelColor = (comp.labelColor || '#757575').replace('#', '');
-    const backgroundColor = isTransparent ? 'Colors.transparent' : `Color(0xFF${color})`;
-    
+    const backgroundColor = isTransparent
+      ? 'Colors.transparent'
+      : `Color(0xFF${color})`;
+
     // Determinar el tipo de borde
     const borderType = comp.borderType || 'outline';
-    
+
     let inputBorder = '';
     let focusedBorder = '';
-    
+
     if (borderType === 'outline') {
       inputBorder = `OutlineInputBorder(
         borderRadius: BorderRadius.circular(${borderRadius}),
@@ -864,7 +958,7 @@ class _${className}State extends State<${className}> {
       inputBorder = 'InputBorder.none';
       focusedBorder = 'InputBorder.none';
     }
-  
+
     let textFieldWidget = `SizedBox(
       width: ${width},
       height: ${height},
@@ -898,14 +992,14 @@ class _${className}State extends State<${className}> {
         enabled: ${comp.enabled !== false},
       ),
     )`;
-  
+
     if (paddingEdgeInsets) {
       textFieldWidget = `Padding(
         padding: ${paddingEdgeInsets},
         child: ${textFieldWidget},
       )`;
     }
-  
+
     return this.wrapWithPositioning(textFieldWidget, comp);
   }
 
@@ -923,12 +1017,12 @@ class _${className}State extends State<${className}> {
     const borderWidth = comp.borderWidth || 2;
     const borderRadius = comp.borderRadius || 0;
     const isChecked = comp.checked || false;
-  
+
     // Determinar si es circular basado en borderRadius
     // Si borderRadius >= 50, se considera circular
     const isCircular = borderRadius >= 50;
     const finalBorderRadius = isCircular ? 50 : borderRadius;
-  
+
     // Crear el shape según si es circular o rectangular
     let shapeWidget = '';
     if (isCircular) {
@@ -947,7 +1041,7 @@ class _${className}State extends State<${className}> {
         ),
       ),`;
     }
-  
+
     let checkboxWidget = `Transform.scale(
       scale: ${scale},
       child: Checkbox(
@@ -966,23 +1060,24 @@ class _${className}State extends State<${className}> {
         },
       ),
     )`;
-  
+
     // Envolver en Container para controlar el tamaño total si es necesario
-    if (width !== 50 || height !== 50) { // Solo si no es el tamaño por defecto
+    if (width !== 50 || height !== 50) {
+      // Solo si no es el tamaño por defecto
       checkboxWidget = `Container(
         width: ${width},
         height: ${height},
         child: ${checkboxWidget},
       )`;
     }
-  
+
     if (paddingEdgeInsets) {
       checkboxWidget = `Padding(
         padding: ${paddingEdgeInsets},
         child: ${checkboxWidget},
       )`;
     }
-  
+
     return this.wrapWithPositioning(checkboxWidget, comp);
   }
   private generateDropdownWidget(
@@ -992,11 +1087,13 @@ class _${className}State extends State<${className}> {
     decoration: string,
     paddingEdgeInsets: string,
   ): string {
-    const optionsArray = Array.isArray(comp.options) ? comp.options : ['Opción 1'];
+    const optionsArray = Array.isArray(comp.options)
+      ? comp.options
+      : ['Opción 1'];
     const optionsList = optionsArray
       .map((opt: string) => `'${opt.replace(/'/g, "\\'")}'`)
       .join(', ');
-  
+
     let dropdownWidget = `Container(
       width: ${width},
       height: ${height},
@@ -1026,7 +1123,7 @@ class _${className}State extends State<${className}> {
         ),
       ),
     )`;
-  
+
     return this.wrapWithPositioning(dropdownWidget, comp);
   }
 
