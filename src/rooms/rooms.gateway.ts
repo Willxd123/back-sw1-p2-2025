@@ -625,4 +625,32 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('error', { message: error.message });
     }
   }
+  
+  //limpiar pantalla
+  @SubscribeMessage('clearPage')
+async handleClearPage(
+  @ConnectedSocket() client: Socket,
+  @MessageBody() data: { roomCode: string; pageId: string },
+) {
+  try {
+    const { roomCode, pageId } = data;
+    const user = client.data.user;
+
+    await this.canvasSync.updateRoomState(roomCode, (pages) => {
+      const page = pages.find((p) => p.id === pageId);
+      if (page) {
+        // Limpiar todos los componentes de la página
+        page.components = [];
+      }
+    });
+
+    // Emitir a todos los usuarios en la sala que la página fue limpiada
+    this.server.to(roomCode).emit('pageCleared', { pageId });
+
+    console.log(`🧹 Página ${pageId} limpiada por ${user.email} en sala ${roomCode}`);
+  } catch (error) {
+    console.error('Error limpiando página:', error);
+    client.emit('error', { message: error.message });
+  }
+}
 }
